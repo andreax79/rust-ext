@@ -9,6 +9,14 @@ use chrono::prelude::*;
 // const FILENAME: &str = "sysgng.dsk";
 const FILENAME: &str = "root";
 const BLOCK_SIZE: usize = 1024;
+const EXT2_ROOT_INO: u32 = 2; /* Root inode */
+// Constants relative to the data blocks
+const EXT2_NDIR_BLOCKS: usize = 12;
+const EXT2_IND_BLOCK: usize = EXT2_NDIR_BLOCKS;
+const EXT2_DIND_BLOCK: usize = EXT2_IND_BLOCK + 1;
+const EXT2_TIND_BLOCK: usize = EXT2_DIND_BLOCK + 1;
+const EXT2_N_BLOCKS: usize = EXT2_TIND_BLOCK + 1;
+
 
 struct FS {
     file: File,
@@ -30,8 +38,11 @@ impl FS {
             block_groups: Vec::new()
         }
     }
-    fn seek(&mut self, sector_num: u64) -> u64 {
-        match self.file.seek(SeekFrom::Start(sector_num * self.block_size as u64)) {
+    fn seek(&mut self, sector_num: u32) -> u64 {
+        self.seek_delta(sector_num, 0)
+    }
+    fn seek_delta(&mut self, base_sector_num: u32, delta: u64) -> u64 {
+        match self.file.seek(SeekFrom::Start(base_sector_num as u64 * self.block_size as u64 + delta)) {
             Ok(r) => r,
             Err(why) => panic!("Error seeking file: {why}")
         }
@@ -45,7 +56,7 @@ impl FS {
         };
         (buffer, nbytes)
     }
-    fn read_sector(&mut self, sector_num: u64) -> (Vec<u8>, usize) {
+    fn read_sector(&mut self, sector_num: u32) -> (Vec<u8>, usize) {
         self.seek(sector_num);
         self.read(self.block_size)
     }
@@ -74,16 +85,32 @@ impl FS {
         // Prepare the Ext2GroupDesc instances
         self.block_groups.clear();
         for i in 0 .. self.super_block.s_groups_count() {
-            println!("--> {i:?}");
             let mut group = Ext2GroupDesc::default();
             let mut buf = &buffer[group_desc_size * i ..group_desc_size * (i+1)];
             unsafe {
-                let block_slice = slice::from_raw_parts_mut(&mut group as *mut _ as *mut u8, group_desc_size);
-                buf.read_exact(block_slice).unwrap();
+                let group_slice = slice::from_raw_parts_mut(&mut group as *mut _ as *mut u8, group_desc_size);
+                buf.read_exact(group_slice).unwrap();
             }
             self.block_groups.push(group);
         }
-        println!("{:#?}", self.block_groups);
+        // println!("{:#?}", self.block_groups);
+    }
+    fn get_inode_group(&self, inode: u32) -> Ext2GroupDesc {
+        // Determine which block group the inode belongs to and return the group
+        self.block_groups[((inode - 1) / self.super_block.s_inodes_per_group) as usize]
+    }
+    fn read_inode(&mut self, inode: u32) -> Ext2Inode {
+        let group = self.get_inode_group(inode);
+        let size: usize = self.super_block.s_inode_size as usize;
+        self.seek_delta(group.bg_inode_table, (inode - 1) as u64 * size as u64);
+        let (buffer, _) = self.read(size);
+        let mut inode = Ext2Inode::default();
+        let mut buf = buffer.as_slice();
+        unsafe {
+            let inode_slice = slice::from_raw_parts_mut(&mut inode as *mut _ as *mut u8, size);
+            buf.read_exact(inode_slice).unwrap();
+        }
+        inode
     }
 }
 
@@ -164,6 +191,43 @@ impl Ext2GroupDesc {
     }
 }
 
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+struct Ext2Inode {
+    i_mode: u16,    /* File mode */
+	i_uid: u16,		/* Low 16 bits of Owner Uid */
+	i_size: u32,    /* Size in bytes */
+	i_atime: u32,	/* Access time */
+	i_ctime: u32,	/* Creation time */
+	i_mtime: u32,	/* Modification time */
+	i_dtime: u32,	/* Deletion Time */
+	i_gid: u16,		/* Low 16 bits of Group Id */
+	i_links_count: u16,	/* Links count */
+	i_blocks: u32,	/* Blocks count */
+	i_flags: u32,	/* File flags */
+    l_i_reserved1: u32,
+	i_block: [u32; EXT2_N_BLOCKS],/* Pointers to blocks (12) +
+   1 Singly Indirect Block Pointer (Points to a block that is a list of block pointers to data)
+   1 Doubly Indirect Block Pointer (Points to a block that is a list of block pointers to Singly Indirect Blocks)
+   1 Triply Indirect Block Pointer (Points to a block that is a list of block pointers to Doubly Indirect Blocks) */
+	i_generation: u32,	/* File version (for NFS) */
+	i_file_acl: u32,/* File ACL */
+	i_dir_acl: u32,	/* Directory ACL */
+	i_faddr: u32,	/* Fragment address */
+    l_i_frag: u8,	/* Fragment number */
+    l_i_fsize: u8,	/* Fragment size */
+    i_pad1: u16,
+    l_i_uid_high: u16,	/* these 2 fields    */
+    l_i_gid_high: u16,	/* were reserved2[0] */
+    l_i_reserved2: u32
+}
+impl Ext2Inode {
+    fn default () -> Ext2Inode {
+        let ionode: Ext2Inode = unsafe { mem::zeroed() };
+        ionode
+    }
+}
+
 fn format_time(time: u32) -> String {
     let naive = NaiveDateTime::from_timestamp(time.into(), 0);
     let datetime: DateTime<Utc> = DateTime::from_utc(naive, Utc);
@@ -200,6 +264,10 @@ fn main() {
     println!("version: {}.{}", super_block.s_rev_level, super_block.s_minor_rev_level);
     println!("{} {}", super_block.s_blocks_count, super_block.s_blocks_per_group);
     println!("s_groups_count: {}", super_block.s_groups_count());
+    println!("s_inodes_per_group: {}", super_block.s_inodes_per_group);
+
+    let inode = fs.read_inode(EXT2_ROOT_INO);
+    println!("{inode:#?}");
 
     // let group_desc_size = mem::size_of::<Ext2GroupDesc>();
     // println!("{group_desc_size}");
