@@ -4,13 +4,17 @@ use std::fs::File;
 use std::io::SeekFrom;
 use std::mem;
 use std::slice;
+use chrono::prelude::*;
 
+// const FILENAME: &str = "sysgng.dsk";
 const FILENAME: &str = "root";
 const BLOCK_SIZE: usize = 1024;
 
 struct FS {
     file: File,
     block_size: usize,
+    super_block: Ext2SuperBlock,
+    block_groups: Vec<Ext2GroupDesc>,
 }
 
 impl FS {
@@ -19,51 +23,98 @@ impl FS {
             Ok(file) => file,
             Err(why) => panic!("Error opening file: {why}"),
         };
-        FS{ file: file, block_size: BLOCK_SIZE }
+        FS{
+            file: file,
+            block_size: BLOCK_SIZE,
+            super_block: Ext2SuperBlock::default(),
+            block_groups: Vec::new()
+        }
     }
-    fn read_sector(&mut self, sector_num: u64) -> (Vec<u8>, usize) {
-        let mut buffer: Vec<u8> = Vec::new();
-        buffer.resize(self.block_size, 0);
+    fn seek(&mut self, sector_num: u64) -> u64 {
         match self.file.seek(SeekFrom::Start(sector_num * self.block_size as u64)) {
             Ok(r) => r,
             Err(why) => panic!("Error seeking file: {why}")
-        };
+        }
+    }
+    fn read(&mut self, size: usize) -> (Vec<u8>, usize) {
+        let mut buffer: Vec<u8> = Vec::new();
+        buffer.resize(size, 0);
         let nbytes: usize = match self.file.read(&mut buffer) {
             Ok(nbytes) => nbytes,
             Err(why) => panic!("Error reading file: {why}")
         };
         (buffer, nbytes)
     }
+    fn read_sector(&mut self, sector_num: u64) -> (Vec<u8>, usize) {
+        self.seek(sector_num);
+        self.read(self.block_size)
+    }
+    fn read_superblock(&mut self) {
+        // Read the Superblock
+        self.block_size = BLOCK_SIZE;
+        let (buffer, _) = self.read_sector(1);
+        let mut buf = buffer.as_slice();
+        unsafe {
+            let block_slice = slice::from_raw_parts_mut(&mut self.super_block as *mut _ as *mut u8, BLOCK_SIZE);
+            buf.read_exact(block_slice).unwrap();
+        }
+        // Get block size
+        self.block_size = self.super_block.s_blocksize();
+        // Check ext2 signature
+        assert_eq!(0xef53, self.super_block.s_magic);
+        // self.read_groups()
+    }
+    fn read_groups(&mut self) {
+        // Read the Block Groups
+        let group_desc_size = mem::size_of::<Ext2GroupDesc>();
+        let size: usize = group_desc_size * self.super_block.s_groups_count();
+        // Read from disk
+        self.seek(2);
+        let (buffer, _) = self.read(size);
+        // Prepare the Ext2GroupDesc instances
+        self.block_groups.clear();
+        for i in 0 .. self.super_block.s_groups_count() {
+            println!("--> {i:?}");
+            let mut group = Ext2GroupDesc::default();
+            let mut buf = &buffer[group_desc_size * i ..group_desc_size * (i+1)];
+            unsafe {
+                let block_slice = slice::from_raw_parts_mut(&mut group as *mut _ as *mut u8, group_desc_size);
+                buf.read_exact(block_slice).unwrap();
+            }
+            self.block_groups.push(group);
+        }
+        println!("{:#?}", self.block_groups);
+    }
 }
 
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 struct Ext2SuperBlock {
-    s_inodes_count: u32,
-    s_blocks_count: u32,
-    s_r_blocks_count: u32,
-    s_free_blocks_count: u32,
-    s_free_inodes_count: u32,
-    s_first_data_block: u32,
+    s_inodes_count: u32, // Total number of inodes in file system
+    s_blocks_count: u32,  // Total number of blocks in file system
+    s_r_blocks_count: u32, // Number of blocks reserved for superuser
+    s_free_blocks_count: u32, // Total number of unallocated blocks
+    s_free_inodes_count: u32, // Total number of unallocated inodes
+    s_first_data_block: u32, // Block number of the block containing the superblock
     s_log_block_size: u32,
     s_log_frag_size: u32,
-    s_blocks_per_group: u32,
-    s_frags_per_group: u32,
-    s_inodes_per_group: u32,
-    s_mtime: u32,
-    s_wtime: u16,
-    s_mnt_count: u16,
-    s_max_mnt_coun: u16,
-    s_magi: u16,
-    s_stat: u16,
-    s_pa: u16,
-    s_minor_rev_level: u16,
-    s_lastcheck: u32,
-    s_checkinterva: u32,
-    s_creator_o: u32,
-    s_rev_leve: u32,
-    s_def_resuid: u16,
-    s_def_regid: u16,
+    s_blocks_per_group: u32, // Number of blocks in each block group
+    s_frags_per_group: u32, // Number of fragments in each block group
+    s_inodes_per_group: u32,  // Number of inodes in each block group
+    s_mtime: u32, // Last mount time
+    s_wtime: u32, // Last written time
+    s_mnt_count: u16, // Number of times the volume has been mounted since its last consistency check
+    s_max_mnt_count: u16, // umber of mounts allowed before a consistency check must be done
+    s_magic: u16, // Ext2 signature (0xef53), used to help confirm the presence of Ext2 on a volume
+    s_state: u16, // File system state
+    s_pad: u16, // What to do when an error is detected
+    s_minor_rev_level: u16, // Minor portion of version
+    s_lastcheck: u32, // Time of last consistency check
+    s_checkinterval: u32, // Interval (in POSIX time) between forced consistency checks
+    s_creator_os: u32, // Operating system ID from which the filesystem on this volume was created
+    s_rev_level: u32, // Major portion of version
+    s_def_resuid: u16, // User ID that can use reserved blocks
+    s_def_regid: u16, // Group ID that can use reserved blocks
     s_first_ino: u32,
     s_inode_size: u16,
     s_block_group_nr: u16,
@@ -77,12 +128,50 @@ struct Ext2SuperBlock {
     s_prealloc_blocks: u8,
     s_prealloc_dir_blocks: u8,
     s_padding1: u16,
-    s_reserved: [u32; 204]
+    // s_reserved: [u32; 204]
+}
+impl Ext2SuperBlock {
+    fn default () -> Ext2SuperBlock {
+        let super_block: Ext2SuperBlock = unsafe { mem::zeroed() };
+        super_block
+    }
+    // Number of groups in the fs
+    fn s_groups_count(&self) -> usize {
+        (self.s_blocks_count as f64 / self.s_blocks_per_group as f64).ceil() as usize
+    }
+    // Block size
+    fn s_blocksize(&self) -> usize {
+        (1024 << self.s_log_block_size) as usize
+    }
 }
 
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+struct Ext2GroupDesc {
+    bg_block_bitmap: u32, // The block which contains the block bitmap for the group.
+    bg_inode_bitmap: u32, // The block contains the inode bitmap for the group.
+    bg_inode_table: u32, // The block contains the inode table first block (the starting block of the inode table.).
+    bg_free_blocks_count: u16, // Number of free blocks in the group.
+    bg_free_inodes_count: u16, // Number of free inodes in the group.
+    bg_used_dirs_count: u16, // Number of inodes allocated to the directories.
+    bg_pad: u16, // Padding (reserved).
+    bg_reserved: [u32; 3] // Reserved.
+}
+impl Ext2GroupDesc {
+    fn default () -> Ext2GroupDesc {
+        let group: Ext2GroupDesc = unsafe { mem::zeroed() };
+        group
+    }
+}
+
+fn format_time(time: u32) -> String {
+    let naive = NaiveDateTime::from_timestamp(time.into(), 0);
+    let datetime: DateTime<Utc> = DateTime::from_utc(naive, Utc);
+    datetime.format("%Y-%m-%d %H:%M:%S").to_string()
+}
 
 fn main() {
-    assert_eq!(BLOCK_SIZE, mem::size_of::<Ext2SuperBlock>());
+    // assert_eq!(BLOCK_SIZE, mem::size_of::<Ext2SuperBlock>());
 
     // // let mut f = File::open(FILENAME);
     // let mut buffer = [0u8; 512];
@@ -99,16 +188,21 @@ fn main() {
     // println!("{nbytes}");
 
     let mut fs = FS::open(FILENAME);
-    let (buffer, nbytes) = fs.read_sector(1);
-    println!("{nbytes}");
+    fs.read_superblock();
+    fs.read_groups();
 
-    let mut super_block: Ext2SuperBlock = unsafe { mem::zeroed() };
-    unsafe {
-        let block_slice = slice::from_raw_parts_mut(&mut super_block as *mut _ as *mut u8, BLOCK_SIZE);
-        buffer.read_exact(block_slice).unwrap();
-    }
+    let super_block = fs.super_block;
+    // println!("Read structure: {:#?}", super_block);
 
-    println!("Read structure: {:#?}", super_block);
+    println!("s_mtime: {}", format_time(super_block.s_mtime));
+    println!("s_wtime: {}", format_time(super_block.s_wtime));
+    println!("s_lastcheck: {}", format_time(super_block.s_lastcheck));
+    println!("version: {}.{}", super_block.s_rev_level, super_block.s_minor_rev_level);
+    println!("{} {}", super_block.s_blocks_count, super_block.s_blocks_per_group);
+    println!("s_groups_count: {}", super_block.s_groups_count());
+
+    // let group_desc_size = mem::size_of::<Ext2GroupDesc>();
+    // println!("{group_desc_size}");
 
     // let mut buffer = [0; 512];
 
