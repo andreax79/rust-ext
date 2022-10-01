@@ -1,3 +1,4 @@
+use std::str;
 use std::io::prelude::*;
 use std::io::Read;
 use std::fs::File;
@@ -86,7 +87,7 @@ impl FS {
         self.block_groups.clear();
         for i in 0 .. self.super_block.s_groups_count() {
             let mut group = Ext2GroupDesc::default();
-            let mut buf = &buffer[group_desc_size * i ..group_desc_size * (i+1)];
+            let mut buf = &buffer[group_desc_size * i .. group_desc_size * (i+1)];
             unsafe {
                 let group_slice = slice::from_raw_parts_mut(&mut group as *mut _ as *mut u8, group_desc_size);
                 buf.read_exact(group_slice).unwrap();
@@ -111,6 +112,35 @@ impl FS {
             buf.read_exact(inode_slice).unwrap();
         }
         inode
+    }
+    fn read_(&mut self, inode: u32) {
+        let inode = self.read_inode(inode);
+        println!("{inode:#?}");
+        let (buffer, s) = self.read_sector(inode.i_block[0]);
+        let mut buf = buffer.as_slice();
+        let mut dir_entry = Ext2DirEntry::default();
+        let size = mem::size_of::<Ext2DirEntry>();
+        let mut offset = 0;
+        while offset < self.block_size {
+            unsafe {
+                let mut buf = &buffer[offset .. offset + size];
+                let dir_slice = slice::from_raw_parts_mut(&mut dir_entry as *mut _ as *mut u8, size);
+                buf.read_exact(dir_slice).unwrap();
+            }
+            // println!("{dir_entry:#?} {size}");
+            let name_slice = &buffer[offset + size .. offset + size + dir_entry.name_len as usize];
+            let name = match str::from_utf8(name_slice) {
+                Ok(v) => v,
+                Err(e) => panic!("Invalid UTF-8 sequence: {}", e),
+            };
+            println!("{name:#?} {offset}");
+            offset += dir_entry.rec_len as usize;
+        }
+
+        // let mut buf = buffer.as_slice();
+        // let mut inode: u32;
+        // buf.read_exact(&mut inode).unwrap();
+        // println!("{res:#?} {s}");
     }
 }
 
@@ -195,36 +225,51 @@ impl Ext2GroupDesc {
 #[derive(Debug, Copy, Clone)]
 struct Ext2Inode {
     i_mode: u16,    /* File mode */
-	i_uid: u16,		/* Low 16 bits of Owner Uid */
-	i_size: u32,    /* Size in bytes */
-	i_atime: u32,	/* Access time */
-	i_ctime: u32,	/* Creation time */
-	i_mtime: u32,	/* Modification time */
-	i_dtime: u32,	/* Deletion Time */
-	i_gid: u16,		/* Low 16 bits of Group Id */
-	i_links_count: u16,	/* Links count */
-	i_blocks: u32,	/* Blocks count */
-	i_flags: u32,	/* File flags */
+    i_uid: u16,     /* Low 16 bits of Owner Uid */
+    i_size: u32,    /* Size in bytes */
+    i_atime: u32,   /* Access time */
+    i_ctime: u32,   /* Creation time */
+    i_mtime: u32,   /* Modification time */
+    i_dtime: u32,   /* Deletion Time */
+    i_gid: u16,     /* Low 16 bits of Group Id */
+    i_links_count: u16, /* Links count */
+    i_blocks: u32,  /* Blocks count - Count of disk sectors (not Ext2 blocks) in use by this inode */
+    i_flags: u32,   /* File flags */
     l_i_reserved1: u32,
-	i_block: [u32; EXT2_N_BLOCKS],/* Pointers to blocks (12) +
+    i_block: [u32; EXT2_N_BLOCKS],/* Pointers to blocks (12) +
    1 Singly Indirect Block Pointer (Points to a block that is a list of block pointers to data)
    1 Doubly Indirect Block Pointer (Points to a block that is a list of block pointers to Singly Indirect Blocks)
    1 Triply Indirect Block Pointer (Points to a block that is a list of block pointers to Doubly Indirect Blocks) */
-	i_generation: u32,	/* File version (for NFS) */
-	i_file_acl: u32,/* File ACL */
-	i_dir_acl: u32,	/* Directory ACL */
-	i_faddr: u32,	/* Fragment address */
-    l_i_frag: u8,	/* Fragment number */
-    l_i_fsize: u8,	/* Fragment size */
+    i_generation: u32,  /* File version (for NFS) */
+    i_file_acl: u32,/* File ACL */
+    i_dir_acl: u32, /* Directory ACL */
+    i_faddr: u32,   /* Fragment address */
+    l_i_frag: u8,   /* Fragment number */
+    l_i_fsize: u8,  /* Fragment size */
     i_pad1: u16,
-    l_i_uid_high: u16,	/* these 2 fields    */
-    l_i_gid_high: u16,	/* were reserved2[0] */
+    l_i_uid_high: u16,  /* these 2 fields    */
+    l_i_gid_high: u16,  /* were reserved2[0] */
     l_i_reserved2: u32
 }
 impl Ext2Inode {
     fn default () -> Ext2Inode {
         let ionode: Ext2Inode = unsafe { mem::zeroed() };
         ionode
+    }
+}
+
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+struct Ext2DirEntry {
+    inode: u32,         /* Inode number */
+    rec_len: u16,       /* Directory entry length */
+    name_len: u8,       /* Name length */
+    file_type: u8
+}
+impl Ext2DirEntry {
+    fn default () -> Ext2DirEntry {
+        let dir: Ext2DirEntry = unsafe { mem::zeroed() };
+        dir
     }
 }
 
@@ -266,8 +311,9 @@ fn main() {
     println!("s_groups_count: {}", super_block.s_groups_count());
     println!("s_inodes_per_group: {}", super_block.s_inodes_per_group);
 
-    let inode = fs.read_inode(EXT2_ROOT_INO);
-    println!("{inode:#?}");
+    // let inode = fs.read_inode(EXT2_ROOT_INO);
+    // println!("{inode:#?}");
+    fs.read_(EXT2_ROOT_INO);
 
     // let group_desc_size = mem::size_of::<Ext2GroupDesc>();
     // println!("{group_desc_size}");
