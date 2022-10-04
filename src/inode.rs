@@ -1,7 +1,6 @@
 use crate::dir::DirEntry;
 use crate::disk::Offset;
 use crate::group::Ext2BlockGroups;
-use crate::superblock::Ext2SuperBlock;
 use crate::Disk;
 use std::collections::BTreeMap;
 use std::io::Read;
@@ -63,35 +62,36 @@ impl Ext2Inode {
 pub struct Inode {
     pub inode_num: u32,        // Inode number
     pub ext2_inode: Ext2Inode, // Ext2 inode struct
+    inode_size: usize,         // Inode size
     block_size: usize,         // Block size
 }
 
 impl Inode {
     pub fn new(
         disk: &mut Disk,
-        super_block: &Ext2SuperBlock,
+        inode_size: usize,
+        block_size: usize,
         block_groups: &Ext2BlockGroups,
         inode_num: u32,
     ) -> Inode {
         let group = block_groups.get_inode_group(inode_num);
-        let size: usize = super_block.s_inode_size as usize;
-        let block_size = super_block.get_blocksize();
         let offset = Offset::SectorDelta {
             block_size: block_size,
             base_sector_num: group.bg_inode_table,
-            delta: (inode_num - 1) as u64 * size as u64,
+            delta: (inode_num - 1) as u64 * inode_size as u64,
         };
-        let buffer = disk.read(size, offset);
+        let buffer = disk.read(inode_size, offset);
         let mut inode = Ext2Inode::default();
         let mut buf = buffer.as_slice();
         let p = &mut inode as *mut _ as *mut u8;
         unsafe {
-            let inode_slice = slice::from_raw_parts_mut(p, size);
+            let inode_slice = slice::from_raw_parts_mut(p, inode_size);
             buf.read_exact(inode_slice).unwrap();
         }
         Inode {
             inode_num: inode_num,
             ext2_inode: inode,
+            inode_size: inode_size,
             block_size: block_size,
         }
     }
@@ -111,7 +111,6 @@ impl Inode {
     pub fn get_child(
         &self,
         disk: &mut Disk,
-        super_block: &Ext2SuperBlock,
         block_groups: &Ext2BlockGroups,
         name: &str,
     ) -> Option<Inode> {
@@ -119,7 +118,8 @@ impl Inode {
             Ok(entries) => match entries.get(name) {
                 Some(dir_entry) => Some(Inode::new(
                     disk,
-                    super_block,
+                    self.inode_size,
+                    self.block_size,
                     block_groups,
                     dir_entry.inode_num,
                 )),

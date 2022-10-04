@@ -4,16 +4,17 @@ pub mod group;
 pub mod inode;
 pub mod superblock;
 
-use std::env;
-use std::str;
-use std::io::{self, Write};
-use std::collections::BTreeMap;
 use crate::dir::DirEntry;
 use crate::disk::Disk;
 use crate::group::Ext2BlockGroups;
 use crate::inode::Inode;
 use crate::superblock::Ext2SuperBlock;
 use chrono::prelude::*;
+use std::collections::BTreeMap;
+use std::env;
+use std::io::{self, Write};
+use std::process;
+use std::str;
 
 const FILENAME: &str = "root";
 const EXT2_ROOT_INO: u32 = 2; /* Root inode */
@@ -38,7 +39,8 @@ impl FS {
     fn read_inode(&mut self, inode_num: u32) -> Inode {
         Inode::new(
             &mut self.disk,
-            &self.super_block,
+            self.super_block.s_inode_size as usize,
+            self.super_block.get_blocksize(),
             &self.block_groups,
             inode_num,
         )
@@ -47,7 +49,7 @@ impl FS {
         let mut inode = self.read_inode(EXT2_ROOT_INO);
         for part in path.split("/") {
             if !part.is_empty() {
-                match inode.get_child(&mut self.disk, &self.super_block, &self.block_groups, part) {
+                match inode.get_child(&mut self.disk, &self.block_groups, part) {
                     Some(child) => inode = child,
                     None => return None,
                 }
@@ -65,17 +67,24 @@ impl FS {
         match self.resolve(path) {
             Some(inode) => {
                 for block in inode.read_blocks(&mut self.disk) {
-                    io::stdout().write(&block).expect("Unable to write on stdout");
+                    io::stdout()
+                        .write(&block)
+                        .expect("Unable to write on stdout");
                 }
-            },
-            None => println!("No such file or directory"),
+            }
+            None => {
+                eprintln!("No such file or directory");
+                process::exit(1);
+            }
         }
     }
     fn ls(&mut self, path: &str) {
         match self.readdir(path) {
             Ok(entries) => {
                 println!("  Inode    Mode Link   Uid   Gid     Side Last modification   File name");
-                println!("---------------------------------------------------------------------------");
+                println!(
+                    "---------------------------------------------------------------------------"
+                );
                 for (_, entry) in entries.iter() {
                     let inode = self.read_inode(entry.inode_num);
                     println!(
@@ -91,7 +100,10 @@ impl FS {
                     )
                 }
             }
-            Err(err) => println!("{}", err),
+            Err(err) => {
+                eprintln!("{}", err);
+                process::exit(1);
+            }
         }
     }
 }
@@ -115,7 +127,10 @@ fn main() {
                     fs.cat(path);
                 }
             }
-            None => { println!("No such file or directory") }
+            None => {
+                eprintln!("No such file or directory");
+                process::exit(1);
+            }
         }
     }
 }
