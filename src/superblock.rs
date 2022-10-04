@@ -1,4 +1,4 @@
-use crate::group::Ext2GroupDesc;
+use crate::disk::Offset;
 use crate::Disk;
 use std::io::Read;
 use std::mem;
@@ -68,7 +68,10 @@ impl Ext2SuperBlock {
     pub fn new(disk: &mut Disk) -> Ext2SuperBlock {
         let mut super_block: Ext2SuperBlock = unsafe { mem::zeroed() };
         assert_eq!(mem::size_of::<Ext2SuperBlock>(), SUPER_BLOCK_SIZE);
-        let offset = disk.calc_offset(SUPER_BLOCK_SIZE, SUPER_BLOCK, 0);
+        let offset = Offset::Sector {
+            block_size: SUPER_BLOCK_SIZE,
+            sector_num: SUPER_BLOCK,
+        };
         let buffer = disk.read(SUPER_BLOCK_SIZE, offset);
         let p = &mut super_block as *mut _ as *mut u8;
         unsafe {
@@ -81,26 +84,5 @@ impl Ext2SuperBlock {
         // Check ext2 signature
         assert_eq!(0xef53, super_block.s_magic);
         super_block
-    }
-    // Read the Block Groups
-    pub fn read_block_groups(&self, disk: &mut Disk) -> Vec<Ext2GroupDesc> {
-        let group_desc_size = mem::size_of::<Ext2GroupDesc>();
-        let size: usize = group_desc_size * self.get_groups_count();
-        // Read from disk
-        let offset = disk.calc_offset(self.get_blocksize(), 2, 0);
-        let buffer = disk.read(size, offset);
-        // Prepare the Ext2GroupDesc instances
-        let mut block_groups = Vec::new();
-        for i in 0..self.get_groups_count() {
-            let mut group = Ext2GroupDesc::default();
-            let mut buf = &buffer[group_desc_size * i..group_desc_size * (i + 1)];
-            unsafe {
-                let group_slice =
-                    slice::from_raw_parts_mut(&mut group as *mut _ as *mut u8, group_desc_size);
-                buf.read_exact(group_slice).unwrap();
-            }
-            block_groups.push(group);
-        }
-        block_groups
     }
 }
