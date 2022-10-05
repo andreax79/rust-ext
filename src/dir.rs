@@ -29,10 +29,10 @@ impl DirEntry {
     pub fn read(buffer: &Vec<u8>, offset: usize) -> (DirEntry, usize) {
         let mut ext2_dir_entry = Ext2DirEntry::default();
         let size = mem::size_of::<Ext2DirEntry>();
+        let mut buf = &buffer[offset..offset + size];
+        let p = &mut ext2_dir_entry as *mut _ as *mut u8;
         unsafe {
-            let mut buf = &buffer[offset..offset + size];
-            let dir_slice =
-                slice::from_raw_parts_mut(&mut ext2_dir_entry as *mut _ as *mut u8, size);
+            let dir_slice = slice::from_raw_parts_mut(p, size);
             buf.read_exact(dir_slice).unwrap();
         }
         let name_slice = &buffer[offset + size..offset + size + ext2_dir_entry.name_len as usize];

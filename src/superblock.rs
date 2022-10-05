@@ -1,5 +1,6 @@
 use crate::disk::Offset;
 use crate::Disk;
+use std::io::Error;
 use std::io::Read;
 use std::mem;
 use std::slice;
@@ -65,24 +66,21 @@ impl Ext2SuperBlock {
         (1024 << self.s_log_block_size) as usize
     }
     // Read the Superblock
-    pub fn new(disk: &mut Disk) -> Ext2SuperBlock {
+    pub fn new(disk: &mut Disk) -> Result<Ext2SuperBlock, Error> {
         let mut super_block: Ext2SuperBlock = unsafe { mem::zeroed() };
         assert_eq!(mem::size_of::<Ext2SuperBlock>(), SUPER_BLOCK_SIZE);
         let offset = Offset::Sector {
             block_size: SUPER_BLOCK_SIZE,
             sector_num: SUPER_BLOCK,
         };
-        let buffer = disk.read(SUPER_BLOCK_SIZE, offset);
+        let buffer = disk.read(SUPER_BLOCK_SIZE, offset)?;
         let p = &mut super_block as *mut _ as *mut u8;
         unsafe {
             let block_slice = slice::from_raw_parts_mut(p, SUPER_BLOCK_SIZE);
-            match buffer.as_slice().read_exact(block_slice) {
-                Ok(r) => r,
-                Err(why) => panic!("Error reading file: {why}"),
-            };
+            buffer.as_slice().read_exact(block_slice)?;
         }
         // Check ext2 signature
         assert_eq!(0xef53, super_block.s_magic);
-        super_block
+        Ok(super_block)
     }
 }

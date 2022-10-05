@@ -1,6 +1,7 @@
 use crate::disk::Disk;
 use crate::disk::Offset;
 use crate::superblock::Ext2SuperBlock;
+use std::io::Error;
 use std::io::Read;
 use std::mem;
 use std::slice;
@@ -46,23 +47,24 @@ pub struct Ext2BlockGroups {
 }
 impl Ext2BlockGroups {
     // Read the Block Groups
-    pub fn new(disk: &mut Disk, super_block: &Ext2SuperBlock) -> Ext2BlockGroups {
+    pub fn new(disk: &mut Disk, super_block: &Ext2SuperBlock) -> Result<Ext2BlockGroups, Error> {
         let size: usize = EXT2_GROUP_DESC_SIZE * super_block.get_groups_count();
         // Read from disk
         let offset = Offset::Sector {
             block_size: super_block.get_blocksize(),
             sector_num: 2,
         };
-        let buffer = disk.read(size, offset);
+        let buffer = disk.read(size, offset)?;
         // Prepare the Ext2GroupDesc instances
-        let mut block_groups = Vec::new();
-        for i in 0..super_block.get_groups_count() {
-            block_groups.push(Ext2GroupDesc::new(i, &buffer));
-        }
-        Ext2BlockGroups {
+        let block_groups: Vec<Ext2GroupDesc> = (0..super_block.get_groups_count())
+            .into_iter()
+            .map(|i| Ext2GroupDesc::new(i, &buffer))
+            .collect();
+        let result = Ext2BlockGroups {
             block_groups: block_groups,
             inodes_per_group: super_block.s_inodes_per_group,
-        }
+        };
+        Ok(result)
     }
     // Determine which block group the inode belongs to and return the group
     pub fn get_inode_group(&self, inode_num: u32) -> &Ext2GroupDesc {

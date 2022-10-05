@@ -1,5 +1,7 @@
 use std::fs::File;
 use std::io::prelude::*;
+use std::io::Error;
+use std::io::ErrorKind;
 use std::io::Read;
 use std::io::SeekFrom;
 
@@ -36,29 +38,25 @@ pub struct Disk {
 }
 
 impl Disk {
-    pub fn open(filename: &str) -> Self {
-        match File::open(filename) {
-            Ok(file) => Self { file: file },
-            Err(why) => panic!("Error opening file: {why}"),
-        }
+    pub fn open(filename: &str) -> Result<Self, Error> {
+        let file = File::open(filename)?;
+        Ok(Self { file: file })
     }
 
-    pub fn read(&mut self, size: usize, offset: Offset) -> Vec<u8> {
+    pub fn read(&mut self, size: usize, offset: Offset) -> Result<Vec<u8>, Error> {
         let offset: u64 = offset.calc_offset();
         let mut buffer: Vec<u8> = Vec::new();
         buffer.resize(size, 0);
-        match self.file.seek(SeekFrom::Start(offset)) {
-            Ok(r) => r,
-            Err(why) => panic!("Error seeking file {offset}: {why}"),
-        };
-        let nbytes: usize = match self.file.read(&mut buffer) {
-            Ok(nbytes) => nbytes,
-            Err(why) => panic!("Error reading file: {why}"),
-        };
+        self.file.seek(SeekFrom::Start(offset))?;
+        let nbytes: usize = self.file.read(&mut buffer)?;
         if nbytes != size {
-            panic!("Not enough bytes read {nbytes} < {size}");
+            Err(Error::new(
+                ErrorKind::UnexpectedEof,
+                "Not enough bytes read {nbytes} < {size}",
+            ))
+        } else {
+            Ok(buffer)
         }
-        buffer
     }
 
     pub fn calc_offset(&self, block_size: usize, base_sector_num: u32, delta: u64) -> u64 {

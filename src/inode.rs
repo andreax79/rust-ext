@@ -3,9 +3,12 @@ use crate::disk::Offset;
 use crate::group::Ext2BlockGroups;
 use crate::Disk;
 use std::collections::BTreeMap;
+use std::io::Error;
+use std::io::ErrorKind;
 use std::io::Read;
 use std::mem;
 use std::slice;
+use std::str;
 
 // Constants relative to the data blocks
 pub const EXT2_NDIR_BLOCKS: usize = 12;
@@ -13,12 +16,6 @@ pub const EXT2_IND_BLOCK: usize = EXT2_NDIR_BLOCKS;
 pub const EXT2_DIND_BLOCK: usize = EXT2_IND_BLOCK + 1;
 pub const EXT2_TIND_BLOCK: usize = EXT2_DIND_BLOCK + 1;
 pub const EXT2_N_BLOCKS: usize = EXT2_TIND_BLOCK + 1;
-
-// Filetype information as used in inodes
-// pub const FILETYPE_INO_MASK	0170000
-pub const FILETYPE_INO_REG: u16 = 32768;
-pub const FILETYPE_INO_DIRECTORY: u16 = 16384;
-pub const FILETYPE_INO_SYMLINK: u16 = 40960;
 
 #[repr(C)]
 #[derive(Debug)]
@@ -73,14 +70,14 @@ impl Inode {
         block_size: usize,
         block_groups: &Ext2BlockGroups,
         inode_num: u32,
-    ) -> Inode {
+    ) -> Result<Inode, Error> {
         let group = block_groups.get_inode_group(inode_num);
         let offset = Offset::SectorDelta {
             block_size: block_size,
             base_sector_num: group.bg_inode_table,
             delta: (inode_num - 1) as u64 * inode_size as u64,
         };
-        let buffer = disk.read(inode_size, offset);
+        let buffer = disk.read(inode_size, offset)?;
         let mut inode = Ext2Inode::default();
         let mut buf = buffer.as_slice();
         let p = &mut inode as *mut _ as *mut u8;
@@ -88,12 +85,12 @@ impl Inode {
             let inode_slice = slice::from_raw_parts_mut(p, inode_size);
             buf.read_exact(inode_slice).unwrap();
         }
-        Inode {
+        Ok(Inode {
             inode_num: inode_num,
             ext2_inode: inode,
             inode_size: inode_size,
             block_size: block_size,
-        }
+        })
     }
 
     // Read blocks
@@ -116,13 +113,16 @@ impl Inode {
     ) -> Option<Inode> {
         match self.readdir(disk) {
             Ok(entries) => match entries.get(name) {
-                Some(dir_entry) => Some(Inode::new(
-                    disk,
-                    self.inode_size,
-                    self.block_size,
-                    block_groups,
-                    dir_entry.inode_num,
-                )),
+                Some(dir_entry) => Some(
+                    Inode::new(
+                        disk,
+                        self.inode_size,
+                        self.block_size,
+                        block_groups,
+                        dir_entry.inode_num,
+                    )
+                    .ok()?,
+                ),
                 None => None,
             },
             Err(_) => None,
@@ -130,13 +130,15 @@ impl Inode {
     }
 
     // Read a directory
-    pub fn readdir(&self, disk: &mut Disk) -> Result<BTreeMap<String, DirEntry>, &'static str> {
+    pub fn readdir(&self, disk: &mut Disk) -> Result<BTreeMap<String, DirEntry>, Error> {
         if !self.is_dir() {
-            Err("Not a directory")
+            Err(Error::new(ErrorKind::InvalidInput, "Not a directory"))
+            // Err(Error::new(ErrorKind::NotADirectory, "Not a directory"))
         } else {
             let mut entries = BTreeMap::new();
             // Iterate over blocks
             for buffer in self.read_blocks(disk) {
+                let buffer = buffer?;
                 let mut offset = 0;
                 // Iterate over block directory entries
                 while offset < self.block_size {
@@ -149,19 +151,28 @@ impl Inode {
         }
     }
 
+    pub fn readlink(&self, disk: &mut Disk) -> Result<String, Error> {
+        // TODO long symlink
+        let b: [u8; 15 * 4] = unsafe { mem::transmute(self.ext2_inode.i_block) };
+        match str::from_utf8(&b[0..self.ext2_inode.i_size as usize]) {
+            Ok(result) => Ok(String::from(result)),
+            Err(e) => Err(Error::new(ErrorKind::InvalidData, e)),
+        }
+    }
+
     // Tests whether this inode is a directory
     pub fn is_dir(&self) -> bool {
-        self.ext2_inode.i_mode & FILETYPE_INO_DIRECTORY == FILETYPE_INO_DIRECTORY
+        return unix_mode::is_dir(self.ext2_inode.i_mode as u32);
     }
 
     // Tests whether this inode is a regular file
     pub fn is_file(&self) -> bool {
-        self.ext2_inode.i_mode & FILETYPE_INO_REG == FILETYPE_INO_REG
+        return unix_mode::is_file(self.ext2_inode.i_mode as u32);
     }
 
     // Tests whether this inode is a symbolic link
     pub fn is_symlink(&self) -> bool {
-        self.ext2_inode.i_mode & FILETYPE_INO_SYMLINK == FILETYPE_INO_SYMLINK
+        return unix_mode::is_symlink(self.ext2_inode.i_mode as u32);
     }
 }
 
@@ -174,7 +185,7 @@ pub struct ReadBlock<'a> {
 }
 
 impl ReadBlock<'_> {
-    fn prepare_block_result(&mut self, block_num: u32) -> Option<Vec<u8>> {
+    fn prepare_block_result(&mut self, block_num: u32) -> Option<Result<Vec<u8>, Error>> {
         if block_num == 0 {
             None
         } else {
@@ -182,7 +193,7 @@ impl ReadBlock<'_> {
         }
     }
 
-    fn read_sector(&mut self, sector_num: u32) -> Vec<u8> {
+    fn read_sector(&mut self, sector_num: u32) -> Result<Vec<u8>, Error> {
         let offset = Offset::Sector {
             block_size: self.block_size,
             sector_num: sector_num,
@@ -192,7 +203,8 @@ impl ReadBlock<'_> {
 }
 
 impl Iterator for ReadBlock<'_> {
-    type Item = Vec<u8>;
+    // Everything is wrapped in a Result so that we can pass IO errors the caller
+    type Item = Result<Vec<u8>, Error>;
 
     fn next(&mut self) -> Option<Self::Item> {
         let current = self.curr;
@@ -206,7 +218,10 @@ impl Iterator for ReadBlock<'_> {
             let addr: usize = (current - EXT2_NDIR_BLOCKS) * mem::size_of::<u32>();
             if self.indirect_blocks[0].is_none() {
                 let block = self.i_block[EXT2_IND_BLOCK];
-                self.indirect_blocks[0] = Some(self.read_sector(block));
+                match self.read_sector(block) {
+                    Err(x) => return Some(Err(x)),
+                    Ok(result) => self.indirect_blocks[0] = Some(result),
+                };
             }
             match &self.indirect_blocks[0] {
                 Some(block) => {
