@@ -55,7 +55,7 @@ impl Ext2Filesystem {
                         } else {
                             inode = child
                         }
-                    },
+                    }
                     None => {
                         return Err(Error::new(ErrorKind::NotFound, "No such file or directory"))
                     }

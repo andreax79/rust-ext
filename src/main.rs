@@ -6,10 +6,10 @@ pub mod group;
 pub mod inode;
 pub mod superblock;
 
-use std::str;
-use std::env;
-use argparse::{ArgumentParser, List, Store};
 use crate::disk::Disk;
+use argparse::{ArgumentParser, List, Store};
+use std::env;
+use std::str;
 
 const FILENAME: &str = "root";
 

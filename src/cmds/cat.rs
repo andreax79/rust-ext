@@ -23,12 +23,15 @@ pub fn cat(filename: &str, args: Vec<String>) -> Result<(), Error> {
                     eprintln!("cat: {}: Is a directory", path);
                     std::process::exit(1);
                 }
+                let mut t: Vec<u8> = Vec::new();
                 for block in inode.read_blocks(&mut fs.disk) {
                     let block = block?;
+                    t.extend(&block);
                     io::stdout()
                         .write(&block)
                         .expect("Unable to write on stdout");
                 }
+                io::stdout().write(&t).expect("Unable to write on stdout");
             }
             Err(x) => {
                 eprintln!("cat: {}: {}", path, x);

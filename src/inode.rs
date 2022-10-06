@@ -16,6 +16,7 @@ pub const EXT2_IND_BLOCK: usize = EXT2_NDIR_BLOCKS;
 pub const EXT2_DIND_BLOCK: usize = EXT2_IND_BLOCK + 1;
 pub const EXT2_TIND_BLOCK: usize = EXT2_DIND_BLOCK + 1;
 pub const EXT2_N_BLOCKS: usize = EXT2_TIND_BLOCK + 1;
+pub const SHORT_INODE_SIZE: usize = EXT2_N_BLOCKS * 4;
 
 #[repr(C)]
 #[derive(Debug)]
@@ -72,9 +73,9 @@ impl Inode {
         inode_num: u32,
     ) -> Result<Inode, Error> {
         let group = block_groups.get_inode_group(inode_num);
-        let offset = Offset::SectorDelta {
+        let offset = Offset::BlockDelta {
             block_size: block_size,
-            base_sector_num: group.bg_inode_table,
+            base_block_num: group.bg_inode_table,
             delta: (inode_num - 1) as u64 * inode_size as u64,
         };
         let buffer = disk.read(inode_size, offset)?;
@@ -85,6 +86,7 @@ impl Inode {
             let inode_slice = slice::from_raw_parts_mut(p, inode_size);
             buf.read_exact(inode_slice).unwrap();
         }
+        // println!("{:#?}", inode);
         Ok(Inode {
             inode_num: inode_num,
             ext2_inode: inode,
@@ -93,7 +95,7 @@ impl Inode {
         })
     }
 
-    // Read blocks
+    // Read blocks iterator
     pub fn read_blocks<'a>(&self, disk: &'a mut Disk) -> ReadBlock<'a> {
         ReadBlock {
             disk: disk,
@@ -102,6 +104,15 @@ impl Inode {
             indirect_blocks: [None, None, None],
             curr: 0,
         }
+    }
+
+    // Read file content
+    pub fn read(&self, disk: &mut Disk) -> Result<Vec<u8>, Error> {
+        let mut buffer: Vec<u8> = Vec::new();
+        for block in self.read_blocks(disk) {
+            buffer.extend(&block?);
+        }
+        Ok(buffer)
     }
 
     // Resolve a child
@@ -151,12 +162,20 @@ impl Inode {
         }
     }
 
+    // Read value of a symbolic link
     pub fn readlink(&self, disk: &mut Disk) -> Result<String, Error> {
-        // TODO long symlink
-        let b: [u8; 15 * 4] = unsafe { mem::transmute(self.ext2_inode.i_block) };
-        match str::from_utf8(&b[0..self.ext2_inode.i_size as usize]) {
-            Ok(result) => Ok(String::from(result)),
-            Err(e) => Err(Error::new(ErrorKind::InvalidData, e)),
+        if self.ext2_inode.i_size <= SHORT_INODE_SIZE as u32 {
+            let buffer: [u8; SHORT_INODE_SIZE] = unsafe { mem::transmute(self.ext2_inode.i_block) };
+            let target = &buffer[0..self.ext2_inode.i_size as usize];
+            match str::from_utf8(target) {
+                Ok(result) => Ok(String::from(result)),
+                Err(e) => Err(Error::new(ErrorKind::InvalidData, e)),
+            }
+        } else {
+            match String::from_utf8(self.read(disk)?) {
+                Ok(result) => Ok(result),
+                Err(e) => Err(Error::new(ErrorKind::InvalidData, e)),
+            }
         }
     }
 
@@ -189,14 +208,14 @@ impl ReadBlock<'_> {
         if block_num == 0 {
             None
         } else {
-            Some(self.read_sector(block_num))
+            Some(self.read_block(block_num))
         }
     }
 
-    fn read_sector(&mut self, sector_num: u32) -> Result<Vec<u8>, Error> {
-        let offset = Offset::Sector {
+    fn read_block(&mut self, block_num: u32) -> Result<Vec<u8>, Error> {
+        let offset = Offset::Block {
             block_size: self.block_size,
-            sector_num: sector_num,
+            block_num: block_num,
         };
         self.disk.read(self.block_size, offset)
     }
@@ -218,7 +237,7 @@ impl Iterator for ReadBlock<'_> {
             let addr: usize = (current - EXT2_NDIR_BLOCKS) * mem::size_of::<u32>();
             if self.indirect_blocks[0].is_none() {
                 let block = self.i_block[EXT2_IND_BLOCK];
-                match self.read_sector(block) {
+                match self.read_block(block) {
                     Err(x) => return Some(Err(x)),
                     Ok(result) => self.indirect_blocks[0] = Some(result),
                 };

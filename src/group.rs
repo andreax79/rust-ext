@@ -19,8 +19,12 @@ pub struct Ext2GroupDesc {
     pub bg_free_blocks_count: u16, // Number of free blocks in the group.
     pub bg_free_inodes_count: u16, // Number of free inodes in the group.
     pub bg_used_dirs_count: u16, // Number of inodes allocated to the directories.
-    pub bg_pad: u16,         // Padding (reserved).
-    pub bg_reserved: [u32; 3], // Reserved.
+    pub bg_flags: u16,
+    pub bg_exclude_bitmap_lo: u32,    // Exclude bitmap for snapshots
+    pub bg_block_bitmap_csum_lo: u16, // crc32c(s_uuid+grp_num+bitmap) LSB
+    pub bg_inode_bitmap_csum_lo: u16, // crc32c(s_uuid+grp_num+bitmap) LSB
+    pub bg_itable_unused: u16,        // Unused inodes count
+    pub bg_checksum: u16,             // crc16(s_uuid+group_num+group_desc)
 }
 impl Ext2GroupDesc {
     pub fn default() -> Ext2GroupDesc {
@@ -49,10 +53,13 @@ impl Ext2BlockGroups {
     // Read the Block Groups
     pub fn new(disk: &mut Disk, super_block: &Ext2SuperBlock) -> Result<Ext2BlockGroups, Error> {
         let size: usize = EXT2_GROUP_DESC_SIZE * super_block.get_groups_count();
+        let block_size = super_block.get_blocksize();
         // Read from disk
-        let offset = Offset::Sector {
-            block_size: super_block.get_blocksize(),
-            sector_num: 2,
+        let offset = Offset::Block {
+            block_size: block_size,
+            // If block size is 1024 the Block Group Descriptor Table will begin at block 2,
+            // for any other block size, it will begin at block 1
+            block_num: if block_size == 1024 { 2 } else { 1 },
         };
         let buffer = disk.read(size, offset)?;
         // Prepare the Ext2GroupDesc instances

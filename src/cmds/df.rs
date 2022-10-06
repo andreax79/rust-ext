@@ -1,8 +1,8 @@
-use std::str;
-use std::io::{self, Error};
 use crate::fs::Ext2Filesystem;
-use argparse::{ArgumentParser};
-use humansize::{FileSize, file_size_opts as options};
+use argparse::ArgumentParser;
+use humansize::{file_size_opts as options, FileSize};
+use std::io::{self, Error};
+use std::str;
 
 fn parse_args(args: Vec<String>) {
     let mut parser = ArgumentParser::new();
@@ -19,8 +19,9 @@ pub fn df(filename: &str, args: Vec<String>) -> Result<(), Error> {
     let avail = fs.super_block.s_free_blocks_count * fs.super_block.get_blocksize() as u32;
     let used = size - avail;
     let use_percent = 100.0 * used as f32 / size as f32;
-    println!("Filesystem                        Size     Used    Avail Use%");
-    println!("{:30} {:8} {:8} {:8} {:.0}%",
+    println!("Filesystem                        Size           Used      Avail     Use%");
+    println!(
+        "{:30} {:12} {:12} {:12} {:.0}%",
         filename,
         size.file_size(options::DECIMAL).unwrap(),
         used.file_size(options::DECIMAL).unwrap(),

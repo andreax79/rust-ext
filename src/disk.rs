@@ -5,14 +5,15 @@ use std::io::ErrorKind;
 use std::io::Read;
 use std::io::SeekFrom;
 
+#[derive(Debug)]
 pub enum Offset {
-    Sector {
+    Block {
         block_size: usize,
-        sector_num: u32,
+        block_num: u32,
     },
-    SectorDelta {
+    BlockDelta {
         block_size: usize,
-        base_sector_num: u32,
+        base_block_num: u32,
         delta: u64,
     },
 }
@@ -20,15 +21,15 @@ pub enum Offset {
 impl Offset {
     pub fn calc_offset(&self) -> u64 {
         match self {
-            Offset::Sector {
+            Offset::Block {
                 block_size,
-                sector_num,
-            } => *sector_num as u64 * *block_size as u64,
-            Offset::SectorDelta {
+                block_num,
+            } => *block_num as u64 * *block_size as u64,
+            Offset::BlockDelta {
                 block_size,
-                base_sector_num,
+                base_block_num,
                 delta,
-            } => *base_sector_num as u64 * *block_size as u64 + *delta,
+            } => *base_block_num as u64 * *block_size as u64 + *delta,
         }
     }
 }
@@ -59,7 +60,7 @@ impl Disk {
         }
     }
 
-    pub fn calc_offset(&self, block_size: usize, base_sector_num: u32, delta: u64) -> u64 {
-        base_sector_num as u64 * block_size as u64 + delta
+    pub fn calc_offset(&self, block_size: usize, base_block_num: u32, delta: u64) -> u64 {
+        base_block_num as u64 * block_size as u64 + delta
     }
 }
