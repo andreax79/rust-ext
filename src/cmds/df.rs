@@ -1,10 +1,11 @@
+use crate::cmds::Options;
 use crate::fs::Ext2Filesystem;
 use argparse::ArgumentParser;
 use humansize::{file_size_opts as options, FileSize};
 use std::io::{self, Error};
-use std::str;
 
 fn parse_args(args: Vec<String>) {
+    // Parse command argument
     let mut parser = ArgumentParser::new();
     parser.set_description("Show information about the file system.");
     if let Err(x) = parser.parse(args, &mut io::stdout(), &mut io::stderr()) {
@@ -12,8 +13,8 @@ fn parse_args(args: Vec<String>) {
     }
 }
 
-pub fn df(filename: &str, args: Vec<String>) -> Result<(), Error> {
-    let fs = Ext2Filesystem::open(filename)?;
+pub fn df(options: &Options, args: Vec<String>) -> Result<(), Error> {
+    let fs = Ext2Filesystem::open(&options.filename)?;
     parse_args(args);
     let size = fs.super_block.s_blocks_count * fs.super_block.get_blocksize() as u32;
     let avail = fs.super_block.s_free_blocks_count * fs.super_block.get_blocksize() as u32;
@@ -22,7 +23,7 @@ pub fn df(filename: &str, args: Vec<String>) -> Result<(), Error> {
     println!("Filesystem                        Size           Used      Avail     Use%");
     println!(
         "{:30} {:12} {:12} {:12} {:.0}%",
-        filename,
+        options.filename,
         size.file_size(options::DECIMAL).unwrap(),
         used.file_size(options::DECIMAL).unwrap(),
         avail.file_size(options::DECIMAL).unwrap(),

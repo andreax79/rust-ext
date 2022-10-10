@@ -1,7 +1,7 @@
+use crate::cmds::Options;
 use crate::fs::Ext2Filesystem;
 use argparse::{ArgumentParser, List};
 use std::io::{self, Error, Write};
-use std::str;
 
 fn parse_args(args: Vec<String>, paths: &mut Vec<String>) {
     let mut parser = ArgumentParser::new();
@@ -12,8 +12,9 @@ fn parse_args(args: Vec<String>, paths: &mut Vec<String>) {
     }
 }
 
-pub fn cat(filename: &str, args: Vec<String>) -> Result<(), Error> {
-    let mut fs = Ext2Filesystem::open(filename)?;
+pub fn cat(options: &Options, args: Vec<String>) -> Result<(), Error> {
+    // Parse command argument
+    let mut fs = Ext2Filesystem::open(&options.filename)?;
     let mut paths: Vec<String> = vec![];
     parse_args(args, &mut paths);
     for path in paths.iter() {

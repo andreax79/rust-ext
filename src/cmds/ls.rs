@@ -1,3 +1,4 @@
+use crate::cmds::Options;
 use crate::dir::DirEntry;
 use crate::fs::Ext2Filesystem;
 use crate::inode::Inode;
@@ -12,6 +13,7 @@ const FMT_NEAR: &str = "%b %e %H:%M";
 const FMT_FAR: &str = "%b %e  %Y";
 
 fn format_time(time: u32) -> String {
+    // Format timestamp
     let naive = NaiveDateTime::from_timestamp(time.into(), 0);
     let datetime: DateTime<Utc> = DateTime::from_utc(naive, Utc);
     if Utc::now() - datetime > Duration::days(365 / 2) {
@@ -27,6 +29,7 @@ fn parse_args(
     long_flg: &mut bool,
     inode_flg: &mut bool,
 ) {
+    // Parse command argument
     let mut parser = ArgumentParser::new();
     parser.set_description("List information about the FILEs.");
     parser.refer(paths).add_argument("file", List, "FILE");
@@ -72,7 +75,7 @@ fn print_direntry(
             suffix,
         )
     } else {
-        print!("{} {} ", prefix, entry.file_name);
+        print!("{} {}  ", prefix, entry.file_name);
     }
     Ok(())
 }
@@ -108,8 +111,8 @@ fn print_path(
     }
 }
 
-pub fn ls(filename: &str, args: Vec<String>) -> Result<(), Error> {
-    let mut fs = Ext2Filesystem::open(filename)?;
+pub fn ls(options: &Options, args: Vec<String>) -> Result<(), Error> {
+    let mut fs = Ext2Filesystem::open(&options.filename)?;
     let mut paths: Vec<String> = vec![];
     let mut long_flg = false;
     let mut inode_flg = false;
