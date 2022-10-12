@@ -10,9 +10,15 @@ use crate::cmds::{Command, Options};
 use crate::disk::Disk;
 use argparse::{ArgumentParser, List, Store};
 use std::env;
+use std::io;
 use std::str;
 
 const FILENAME: &str = "root";
+
+fn get_cmd() -> String {
+    let args: Vec<String> = env::args().collect();
+    args[0].clone()
+}
 
 fn parse_args(subcommand: &mut Command, args: &mut Vec<String>, options: &mut Options) {
     // Parse command argument
@@ -24,29 +30,36 @@ fn parse_args(subcommand: &mut Command, args: &mut Vec<String>, options: &mut Op
     parser
         .refer(subcommand)
         .required()
-        .add_argument("command", Store, "cat, df, ls");
+        .add_argument("command", Store, "Command");
     parser
         .refer(args)
         .add_argument("arguments", List, "Arguments for command");
     parser.stop_on_first_argument(true);
-    parser.parse_args_or_exit();
+    if let Err(x) = parser.parse(env::args().collect(), &mut io::stdout(), &mut io::sink()) {
+        eprintln!("Usage:");
+        eprintln!("  {} DEVICE COMMAND [ARGUMENTS ...]", get_cmd());
+        eprintln!();
+        eprintln!("Commands:");
+        eprintln!("  cat              Concatenate FILE(s) to standard output.");
+        eprintln!("  df               Show information about the file system.");
+        eprintln!("  ls               List information about the FILEs.");
+        std::process::exit(x);
+    }
 }
 
 fn main() {
-    let args: Vec<String> = env::args().collect();
-    let cmd = &args[0].clone();
     let mut options: Options = Options {
         filename: String::from(FILENAME),
     };
     let mut subcommand = Command::ls;
     let mut args = vec![];
     parse_args(&mut subcommand, &mut args, &mut options);
-    args.insert(0, format!("{} {:?}", cmd, subcommand));
+    args.insert(0, format!("{} {:?}", get_cmd(), subcommand));
     let result = subcommand.run_command(&options, args);
     match result {
         Ok(_) => std::process::exit(0),
         Err(x) => {
-            eprintln!("{}: {}", cmd, x);
+            eprintln!("{}: {}", get_cmd(), x);
             std::process::exit(1);
         }
     }
