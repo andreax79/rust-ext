@@ -16,7 +16,7 @@ pub const EXT2_IND_BLOCK: usize = EXT2_NDIR_BLOCKS;
 pub const EXT2_DIND_BLOCK: usize = EXT2_IND_BLOCK + 1;
 pub const EXT2_TIND_BLOCK: usize = EXT2_DIND_BLOCK + 1;
 pub const EXT2_N_BLOCKS: usize = EXT2_TIND_BLOCK + 1;
-pub const SHORT_INODE_SIZE: usize = EXT2_N_BLOCKS * 4;
+pub const I_BLOCKS_SIZE: usize = EXT2_N_BLOCKS * 4;
 
 #[repr(C)]
 #[derive(Debug)]
@@ -164,8 +164,10 @@ impl Inode {
 
     // Read value of a symbolic link
     pub fn readlink(&self, disk: &mut Disk) -> Result<String, Error> {
-        if self.ext2_inode.i_size <= SHORT_INODE_SIZE as u32 {
-            let buffer: [u8; SHORT_INODE_SIZE] = unsafe { mem::transmute(self.ext2_inode.i_block) };
+        // The target of a symbolic link is stored in the inode
+        // if it is less than 60 bytes long.
+        if self.ext2_inode.i_size <= I_BLOCKS_SIZE as u32 {
+            let buffer: [u8; I_BLOCKS_SIZE] = unsafe { mem::transmute(self.ext2_inode.i_block) };
             let target = &buffer[0..self.ext2_inode.i_size as usize];
             match str::from_utf8(target) {
                 Ok(result) => Ok(String::from(result)),
@@ -244,12 +246,7 @@ impl Iterator for ReadBlock<'_> {
             }
             match &self.indirect_blocks[0] {
                 Some(block) => {
-                    let bytes: [u8; 4] = [
-                        block[addr],
-                        block[addr + 1],
-                        block[addr + 2],
-                        block[addr + 3],
-                    ];
+                    let bytes = block[addr..addr + 3].try_into().expect("incorrect length");
                     self.prepare_block_result(u32::from_le_bytes(bytes))
                 }
                 None => None,
