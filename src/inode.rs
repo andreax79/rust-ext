@@ -1,7 +1,6 @@
 use crate::dir::DirEntry;
-use crate::disk::Offset;
+use crate::disk::{Offset, Disk, BlockCache};
 use crate::group::Ext2BlockGroups;
-use crate::Disk;
 use std::collections::BTreeMap;
 use std::io::Error;
 use std::io::ErrorKind;
@@ -61,12 +60,13 @@ pub struct Inode {
     pub inode_num: u32,        // Inode number
     pub ext2_inode: Ext2Inode, // Ext2 inode struct
     inode_size: usize,         // Inode size
-    block_size: usize,         // Block size
+    pub block_size: usize,     // Block size
+    data_blocks_count: u32,     // Number of data blocks
 }
 
 impl Inode {
     pub fn new(
-        disk: &mut Disk,
+        disk: &Disk,
         inode_size: usize,
         block_size: usize,
         block_groups: &Ext2BlockGroups,
@@ -86,17 +86,19 @@ impl Inode {
             let inode_slice = slice::from_raw_parts_mut(p, inode_size);
             buf.read_exact(inode_slice).unwrap();
         }
-        // println!("{:#?}", inode);
+        // Calculate the number of data blocks
+        let data_blocks_count: u32 = (inode.i_size as f32 / block_size as f32).ceil() as u32;
         Ok(Inode {
             inode_num: inode_num,
             ext2_inode: inode,
             inode_size: inode_size,
             block_size: block_size,
+            data_blocks_count: data_blocks_count,
         })
     }
 
     // Read blocks iterator
-    pub fn read_blocks<'a>(&self, disk: &'a mut Disk) -> ReadBlock<'a> {
+    pub fn read_blocks<'a>(&self, disk: &'a Disk) -> ReadBlock<'a> {
         ReadBlock {
             disk: disk,
             block_size: self.block_size,
@@ -107,7 +109,7 @@ impl Inode {
     }
 
     // Read file content
-    pub fn read(&self, disk: &mut Disk) -> Result<Vec<u8>, Error> {
+    pub fn read(&self, disk: &Disk) -> Result<Vec<u8>, Error> {
         let mut buffer: Vec<u8> = Vec::new();
         for block in self.read_blocks(disk) {
             buffer.extend(&block?);
@@ -115,10 +117,36 @@ impl Inode {
         Ok(buffer)
     }
 
+    pub fn get_blocks(&self, disk: &Disk) -> Result<Vec<u32>, Error> {
+        let mut cache = BlockCache::new(disk, self.block_size);
+
+        // let mut cache: HashMap<u32, Vec<u8>> = HashMap::new();
+        let mut blocks = vec![0; self.data_blocks_count as usize];
+        // println!("data_blocks_count={:#?}", self.data_blocks_count);
+        for i in 0..blocks.len() {
+            // println!("i={}", i);
+            if i < EXT2_NDIR_BLOCKS {
+                // Direct blocks
+                blocks[i] = self.ext2_inode.i_block[i];
+            } else if i < (EXT2_NDIR_BLOCKS + (self.block_size / mem::size_of::<u32>())) {
+                // Indirect blocks
+                let indirect_block_num: u32 = self.ext2_inode.i_block[EXT2_IND_BLOCK];
+                let indirect_blocks = cache.get_block(indirect_block_num)?;
+                let addr: usize = (i - EXT2_NDIR_BLOCKS) * mem::size_of::<u32>();
+                let bytes: [u8; 4] = indirect_blocks[addr..addr + 4].try_into().expect("incorrect length");
+                blocks[i] = u32::from_le_bytes(bytes);
+            } else {
+                // TODO: indirect 2 and 3
+            }
+        };
+        // println!("blocks={:#?}", &blocks);
+        Ok(blocks)
+    }
+
     // Resolve a child
     pub fn get_child(
         &self,
-        disk: &mut Disk,
+        disk: &Disk,
         block_groups: &Ext2BlockGroups,
         name: &str,
     ) -> Option<Inode> {
@@ -141,7 +169,7 @@ impl Inode {
     }
 
     // Read a directory
-    pub fn readdir(&self, disk: &mut Disk) -> Result<BTreeMap<String, DirEntry>, Error> {
+    pub fn readdir(&self, disk: &Disk) -> Result<BTreeMap<String, DirEntry>, Error> {
         if !self.is_dir() {
             Err(Error::new(ErrorKind::InvalidInput, "Not a directory"))
             // Err(Error::new(ErrorKind::NotADirectory, "Not a directory"))
@@ -163,7 +191,7 @@ impl Inode {
     }
 
     // Read value of a symbolic link
-    pub fn readlink(&self, disk: &mut Disk) -> Result<String, Error> {
+    pub fn readlink(&self, disk: &Disk) -> Result<String, Error> {
         // The target of a symbolic link is stored in the inode
         // if it is less than 60 bytes long.
         if self.ext2_inode.i_size <= I_BLOCKS_SIZE as u32 {
@@ -198,7 +226,7 @@ impl Inode {
 }
 
 pub struct ReadBlock<'a> {
-    disk: &'a mut Disk,
+    disk: &'a Disk,
     block_size: usize,
     i_block: [u32; EXT2_N_BLOCKS],
     indirect_blocks: [Option<Vec<u8>>; 3],

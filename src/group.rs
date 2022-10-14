@@ -51,7 +51,7 @@ pub struct Ext2BlockGroups {
 }
 impl Ext2BlockGroups {
     // Read the Block Groups
-    pub fn new(disk: &mut Disk, super_block: &Ext2SuperBlock) -> Result<Ext2BlockGroups, Error> {
+    pub fn new(disk: &Disk, super_block: &Ext2SuperBlock) -> Result<Ext2BlockGroups, Error> {
         let size: usize = EXT2_GROUP_DESC_SIZE * super_block.get_groups_count();
         let block_size = super_block.get_blocksize();
         // Read from disk

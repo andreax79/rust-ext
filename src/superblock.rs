@@ -68,7 +68,7 @@ impl Ext2SuperBlock {
         (1024 << self.s_log_block_size) as usize
     }
     // Read the Superblock
-    pub fn new(disk: &mut Disk) -> Result<Ext2SuperBlock, Error> {
+    pub fn new(disk: &Disk) -> Result<Ext2SuperBlock, Error> {
         let mut super_block: Ext2SuperBlock = unsafe { mem::zeroed() };
         assert_eq!(mem::size_of::<Ext2SuperBlock>(), SUPER_BLOCK_SIZE);
         let offset = Offset::Block {

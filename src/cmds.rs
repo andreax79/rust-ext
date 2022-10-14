@@ -1,5 +1,6 @@
 pub mod cat;
 pub mod df;
+pub mod hd;
 pub mod ls;
 
 use std::io::Error;
@@ -15,6 +16,7 @@ pub struct Options {
 pub enum Command {
     cat,
     df,
+    hd,
     ls,
 }
 
@@ -24,6 +26,7 @@ impl FromStr for Command {
         return match src {
             "cat" => Ok(Command::cat),
             "df" => Ok(Command::df),
+            "hd" => Ok(Command::hd),
             "ls" => Ok(Command::ls),
             _ => Err(()),
         };
@@ -35,6 +38,7 @@ impl Command {
         match self {
             Command::cat => cat::cat(&options, args),
             Command::df => df::df(&options, args),
+            Command::hd => hd::hd(&options, args),
             Command::ls => ls::ls(&options, args),
         }
     }

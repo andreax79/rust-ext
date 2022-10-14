@@ -1,6 +1,7 @@
 pub mod cmds;
 pub mod dir;
 pub mod disk;
+pub mod file;
 pub mod fs;
 pub mod group;
 pub mod inode;
@@ -42,6 +43,7 @@ fn parse_args(subcommand: &mut Command, args: &mut Vec<String>, options: &mut Op
         eprintln!("Commands:");
         eprintln!("  cat              Concatenate FILE(s) to standard output.");
         eprintln!("  df               Show information about the file system.");
+        eprintln!("  hd               Display file contents in hexadecimal.");
         eprintln!("  ls               List information about the FILEs.");
         std::process::exit(x);
     }
