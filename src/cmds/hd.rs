@@ -1,6 +1,6 @@
 use crate::cmds::Options;
-use crate::fs::Ext2Filesystem;
 use crate::file::FsFile;
+use crate::fs::Ext2Filesystem;
 use argparse::{ArgumentParser, List};
 use std::io::{self, Error, Read};
 
@@ -31,9 +31,9 @@ pub fn print_file(f: &mut FsFile) -> Result<(), Error> {
         if len == 0 {
             break;
         }
-        for b in 0 .. (len+15) / 16 {
+        for b in 0..(len + 15) / 16 {
             let addr = b * 16;
-            let t = &buffer[addr..addr+16];
+            let t = &buffer[addr..addr + 16];
             print!("{:08x} ", addr);
             for ch in t {
                 print!(" {:02x}", ch);
@@ -53,7 +53,7 @@ pub fn show_file(path: &String, fs: &Ext2Filesystem) -> Result<(), Error> {
     match FsFile::open(&fs, path) {
         Ok(mut f) => {
             print_file(&mut f)?;
-        },
+        }
         Err(x) => {
             eprintln!("hd: {}: {}", path, x);
             std::process::exit(1);

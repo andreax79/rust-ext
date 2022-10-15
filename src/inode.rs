@@ -1,5 +1,5 @@
 use crate::dir::DirEntry;
-use crate::disk::{Offset, Disk, BlockCache};
+use crate::disk::{BlockCache, Disk, Offset};
 use crate::group::Ext2BlockGroups;
 use std::collections::BTreeMap;
 use std::io::Error;
@@ -57,11 +57,11 @@ impl Ext2Inode {
 
 #[derive(Debug)]
 pub struct Inode {
-    pub inode_num: u32,        // Inode number
-    pub ext2_inode: Ext2Inode, // Ext2 inode struct
-    inode_size: usize,         // Inode size
-    pub block_size: usize,     // Block size
-    data_blocks_count: u32,     // Number of data blocks
+    pub inode_num: u32,         // Inode number
+    pub ext2_inode: Ext2Inode,  // Ext2 inode struct
+    pub inode_size: usize,      // Inode size
+    pub block_size: usize,      // Block size
+    pub data_blocks_count: u32, // Number of data blocks
 }
 
 impl Inode {
@@ -98,49 +98,40 @@ impl Inode {
     }
 
     // Read blocks iterator
-    pub fn read_blocks<'a>(&self, disk: &'a Disk) -> ReadBlock<'a> {
-        ReadBlock {
+    pub fn read_blocks_iter<'a>(&'a self, disk: &'a Disk) -> Result<ReadBlock<'a>, Error> {
+        Ok(ReadBlock {
             disk: disk,
             block_size: self.block_size,
-            i_block: self.ext2_inode.i_block,
-            indirect_blocks: [None, None, None],
-            curr: 0,
-        }
+            blocks: self.get_blocks_iter(disk)?,
+        })
     }
 
     // Read file content
     pub fn read(&self, disk: &Disk) -> Result<Vec<u8>, Error> {
         let mut buffer: Vec<u8> = Vec::new();
-        for block in self.read_blocks(disk) {
+        for block in self.read_blocks_iter(disk)? {
             buffer.extend(&block?);
         }
         Ok(buffer)
     }
 
-    pub fn get_blocks(&self, disk: &Disk) -> Result<Vec<u32>, Error> {
-        let mut cache = BlockCache::new(disk, self.block_size);
+    // Block numbers iterator
+    pub fn get_blocks_iter<'a>(&'a self, disk: &'a Disk) -> Result<ReadBlockNum<'a>, Error> {
+        Ok(ReadBlockNum {
+            blocks_per_block: self.block_size / mem::size_of::<u32>(),
+            i_block: &self.ext2_inode.i_block,
+            data_blocks_count: self.data_blocks_count,
+            cache: BlockCache::new(disk, self.block_size),
+            curr: 0,
+        })
+    }
 
-        // let mut cache: HashMap<u32, Vec<u8>> = HashMap::new();
-        let mut blocks = vec![0; self.data_blocks_count as usize];
-        // println!("data_blocks_count={:#?}", self.data_blocks_count);
-        for i in 0..blocks.len() {
-            // println!("i={}", i);
-            if i < EXT2_NDIR_BLOCKS {
-                // Direct blocks
-                blocks[i] = self.ext2_inode.i_block[i];
-            } else if i < (EXT2_NDIR_BLOCKS + (self.block_size / mem::size_of::<u32>())) {
-                // Indirect blocks
-                let indirect_block_num: u32 = self.ext2_inode.i_block[EXT2_IND_BLOCK];
-                let indirect_blocks = cache.get_block(indirect_block_num)?;
-                let addr: usize = (i - EXT2_NDIR_BLOCKS) * mem::size_of::<u32>();
-                let bytes: [u8; 4] = indirect_blocks[addr..addr + 4].try_into().expect("incorrect length");
-                blocks[i] = u32::from_le_bytes(bytes);
-            } else {
-                // TODO: indirect 2 and 3
-            }
-        };
-        // println!("blocks={:#?}", &blocks);
-        Ok(blocks)
+    // Block numbers
+    pub fn get_blocks(&self, disk: &Disk) -> Result<Vec<u32>, Error> {
+        match self.get_blocks_iter(disk) {
+            Ok(iterator) => iterator.collect::<Result<Vec<_>, _>>(),
+            Err(x) => Err(x),
+        }
     }
 
     // Resolve a child
@@ -176,7 +167,7 @@ impl Inode {
         } else {
             let mut entries = BTreeMap::new();
             // Iterate over blocks
-            for buffer in self.read_blocks(disk) {
+            for buffer in self.read_blocks_iter(disk)? {
                 let buffer = buffer?;
                 let mut offset = 0;
                 // Iterate over block directory entries
@@ -225,12 +216,79 @@ impl Inode {
     }
 }
 
+pub struct ReadBlockNum<'a> {
+    blocks_per_block: usize, // number of block number (u32) in a block
+    i_block: &'a [u32; EXT2_N_BLOCKS],
+    data_blocks_count: u32,
+    cache: BlockCache<'a>,
+    curr: usize,
+}
+
+impl ReadBlockNum<'_> {
+    fn get_direct_block(&self, i: usize) -> Result<u32, Error> {
+        // Get direct block
+        Ok(self.i_block[i])
+    }
+
+    fn get_indirect_block(&mut self, i: usize) -> Result<u32, Error> {
+        // Get singly indirect block
+        let indirect_block_num: u32 = self.i_block[EXT2_IND_BLOCK];
+        let indirect_blocks = self.cache.get_block(indirect_block_num)?;
+        let addr: usize = (i - EXT2_NDIR_BLOCKS) * mem::size_of::<u32>();
+        let bytes: [u8; 4] = indirect_blocks[addr..addr + 4]
+            .try_into()
+            .expect("incorrect length");
+        Ok(u32::from_le_bytes(bytes))
+    }
+
+    fn get_doubly_indirect_block(&mut self, _: usize) -> Result<u32, Error> {
+        // Get doubly indirect block
+        Err(Error::new(
+            ErrorKind::Unsupported,
+            "TODO: dobuly indirect block",
+        ))
+    }
+
+    fn get_triply_indirect_block(&mut self, _: usize) -> Result<u32, Error> {
+        // Get triply indirect block
+        Err(Error::new(
+            ErrorKind::Unsupported,
+            "TODO: triply indirect block",
+        ))
+    }
+}
+
+impl Iterator for ReadBlockNum<'_> {
+    // Everything is wrapped in a Result so that we can pass IO errors the caller
+    type Item = Result<u32, Error>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let i = self.curr;
+        if self.curr >= self.data_blocks_count as usize {
+            None
+        } else {
+            self.curr = self.curr + 1;
+            if i < EXT2_NDIR_BLOCKS {
+                Some(self.get_direct_block(i))
+            } else if i < (EXT2_NDIR_BLOCKS + self.blocks_per_block) {
+                Some(self.get_indirect_block(i))
+            } else if i
+                < (EXT2_NDIR_BLOCKS
+                    + self.blocks_per_block
+                    + self.blocks_per_block * self.blocks_per_block)
+            {
+                Some(self.get_doubly_indirect_block(i))
+            } else {
+                Some(self.get_triply_indirect_block(i))
+            }
+        }
+    }
+}
+
 pub struct ReadBlock<'a> {
     disk: &'a Disk,
     block_size: usize,
-    i_block: [u32; EXT2_N_BLOCKS],
-    indirect_blocks: [Option<Vec<u8>>; 3],
-    curr: usize,
+    blocks: ReadBlockNum<'a>,
 }
 
 impl ReadBlock<'_> {
@@ -256,33 +314,9 @@ impl Iterator for ReadBlock<'_> {
     type Item = Result<Vec<u8>, Error>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let current = self.curr;
-        self.curr = self.curr + 1;
-        if current < EXT2_NDIR_BLOCKS {
-            // Direct blocks
-            let block = self.i_block[current];
-            self.prepare_block_result(block)
-        } else if current < (EXT2_NDIR_BLOCKS + (self.block_size / mem::size_of::<u32>())) {
-            // Indirect blocks
-            let addr: usize = (current - EXT2_NDIR_BLOCKS) * mem::size_of::<u32>();
-            if self.indirect_blocks[0].is_none() {
-                let block = self.i_block[EXT2_IND_BLOCK];
-                match self.read_block(block) {
-                    Err(x) => return Some(Err(x)),
-                    Ok(result) => self.indirect_blocks[0] = Some(result),
-                };
-            }
-            match &self.indirect_blocks[0] {
-                Some(block) => {
-                    let bytes = block[addr..addr + 3].try_into().expect("incorrect length");
-                    self.prepare_block_result(u32::from_le_bytes(bytes))
-                }
-                None => None,
-            }
-
-        // TODO: indirect 2 and 3
-        } else {
-            None
+        match self.blocks.next() {
+            Some(block) => self.prepare_block_result(block.ok()?),
+            None => None,
         }
     }
 }

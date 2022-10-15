@@ -1,12 +1,12 @@
+use std::cell::UnsafeCell;
+use std::collections::hash_map::Entry::{Occupied, Vacant};
+use std::collections::HashMap;
 use std::fs::File;
 use std::io::prelude::*;
 use std::io::Error;
 use std::io::ErrorKind;
 use std::io::Read;
 use std::io::SeekFrom;
-use std::cell::UnsafeCell;
-use std::collections::HashMap;
-use std::collections::hash_map::Entry::{Occupied, Vacant};
 
 #[derive(Debug)]
 pub enum Offset {
@@ -78,10 +78,13 @@ pub struct BlockCache<'a> {
 }
 
 impl BlockCache<'_> {
-
     pub fn new(disk: &Disk, block_size: usize) -> BlockCache {
         let cache: HashMap<u32, Vec<u8>> = HashMap::new();
-        BlockCache{ disk: disk, block_size: block_size, cache: cache }
+        BlockCache {
+            disk: disk,
+            block_size: block_size,
+            cache: cache,
+        }
     }
 
     pub fn get_block(&mut self, block_num: u32) -> Result<&Vec<u8>, Error> {
@@ -93,9 +96,8 @@ impl BlockCache<'_> {
                 };
                 let data = self.disk.read(self.block_size, offset)?;
                 Ok(entry.insert(data))
-            },
+            }
             Occupied(entry) => Ok(entry.into_mut()),
         }
     }
-
 }
