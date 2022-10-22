@@ -58,7 +58,7 @@ impl Disk {
             if nbytes != size {
                 Err(Error::new(
                     ErrorKind::UnexpectedEof,
-                    "Not enough bytes read {nbytes} < {size}",
+                    format!("Not enough bytes read {nbytes} < {size}"),
                 ))
             } else {
                 Ok(buffer)

@@ -36,8 +36,8 @@ impl FsFile<'_> {
     }
 
     fn how_many_bytes(&self, buffer_len: usize) -> usize {
-        if self.pos + buffer_len as u64 > self.inode.ext2_inode.i_size as u64 {
-            (self.inode.ext2_inode.i_size as u64 - self.pos) as usize
+        if self.pos + buffer_len as u64 > self.inode.size {
+            (self.inode.size - self.pos) as usize
         } else {
             buffer_len
         }
@@ -53,7 +53,7 @@ impl FsFile<'_> {
 
     fn is_eol(&self) -> bool {
         // Is EOL ?
-        self.pos >= self.inode.ext2_inode.i_size as u64
+        self.pos >= self.inode.size
     }
 }
 

@@ -12,9 +12,9 @@ use std::str;
 // Constants relative to the data blocks
 pub const EXT2_NDIR_BLOCKS: usize = 12;
 pub const EXT2_IND_BLOCK: usize = EXT2_NDIR_BLOCKS;
-pub const EXT2_DIND_BLOCK: usize = EXT2_IND_BLOCK + 1;
-pub const EXT2_TIND_BLOCK: usize = EXT2_DIND_BLOCK + 1;
-pub const EXT2_N_BLOCKS: usize = EXT2_TIND_BLOCK + 1;
+pub const EXT2_DOUBLY_IND_BLOCK: usize = EXT2_IND_BLOCK + 1;
+pub const EXT2_TRIPLY_IND_BLOCK: usize = EXT2_DOUBLY_IND_BLOCK + 1;
+pub const EXT2_N_BLOCKS: usize = EXT2_TRIPLY_IND_BLOCK + 1;
 pub const I_BLOCKS_SIZE: usize = EXT2_N_BLOCKS * 4;
 
 #[repr(C)]
@@ -22,15 +22,15 @@ pub const I_BLOCKS_SIZE: usize = EXT2_N_BLOCKS * 4;
 pub struct Ext2Inode {
     pub i_mode: u16,        /* File mode */
     pub i_uid: u16,         /* Low 16 bits of Owner Uid */
-    pub i_size: u32,        /* Size in bytes */
+    pub i_size: u32,        /* Lower 32 bits of size in bytes */
     pub i_atime: u32,       /* Access time */
     pub i_ctime: u32,       /* Creation time */
     pub i_mtime: u32,       /* Modification time */
     pub i_dtime: u32,       /* Deletion Time */
     pub i_gid: u16,         /* Low 16 bits of Group Id */
     pub i_links_count: u16, /* Links count */
-    pub i_blocks: u32, /* Blocks count - Count of disk sectors (not Ext2 blocks) in use by this inode */
-    pub i_flags: u32,  /* File flags */
+    pub i_blocks: u32,      /* Count of disk sectors (not Ext2 blocks) in use by this inode */
+    pub i_flags: u32,       /* File flags */
     pub l_i_reserved1: u32,
     pub i_block: [u32; EXT2_N_BLOCKS], /* Pointers to blocks (12) +
                                        1 Singly Indirect Block Pointer (Points to a block that is a list of block pointers to data)
@@ -38,7 +38,7 @@ pub struct Ext2Inode {
                                        1 Triply Indirect Block Pointer (Points to a block that is a list of block pointers to Doubly Indirect Blocks) */
     pub i_generation: u32, /* File version (for NFS) */
     pub i_file_acl: u32,   /* File ACL */
-    pub i_dir_acl: u32,    /* Directory ACL */
+    pub i_size_high: u32,
     pub i_faddr: u32,      /* Fragment address */
     pub l_i_frag: u8,      /* Fragment number */
     pub l_i_fsize: u8,     /* Fragment size */
@@ -53,6 +53,14 @@ impl Ext2Inode {
         let ionode: Ext2Inode = unsafe { mem::zeroed() };
         ionode
     }
+    pub fn size(&self) -> u64 {
+        // Calculate the size in bytes
+        if unix_mode::is_file(self.i_mode as u32) {
+            self.i_size as u64 | ((self.i_size_high as u64) << 32)
+        } else {
+            self.i_size as u64
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -61,6 +69,7 @@ pub struct Inode {
     pub ext2_inode: Ext2Inode,  // Ext2 inode struct
     pub inode_size: usize,      // Inode size
     pub block_size: usize,      // Block size
+    pub size: u64,              // Size in bytes
     pub data_blocks_count: u32, // Number of data blocks
 }
 
@@ -72,12 +81,15 @@ impl Inode {
         block_groups: &Ext2BlockGroups,
         inode_num: u32,
     ) -> Result<Inode, Error> {
+        // Determinate the block group
         let group = block_groups.get_inode_group(inode_num);
+        // Calculate the offset
         let offset = Offset::BlockDelta {
             block_size: block_size,
-            base_block_num: group.bg_inode_table,
-            delta: (inode_num - 1) as u64 * inode_size as u64,
+            base_block_num: group.ext2_group_desc.bg_inode_table,
+            delta: (inode_num - group.first_inode_num) as u64 * inode_size as u64,
         };
+        // Read the inode from the disk
         let buffer = disk.read(inode_size, offset)?;
         let mut inode = Ext2Inode::default();
         let mut buf = buffer.as_slice();
@@ -86,13 +98,16 @@ impl Inode {
             let inode_slice = slice::from_raw_parts_mut(p, inode_size);
             buf.read_exact(inode_slice).unwrap();
         }
+        // Calculate the size
+        let size = inode.size();
         // Calculate the number of data blocks
-        let data_blocks_count: u32 = (inode.i_size as f32 / block_size as f32).ceil() as u32;
+        let data_blocks_count: u32 = (size as f64 / block_size as f64).ceil() as u32;
         Ok(Inode {
             inode_num: inode_num,
             ext2_inode: inode,
             inode_size: inode_size,
             block_size: block_size,
+            size: size,
             data_blocks_count: data_blocks_count,
         })
     }
@@ -117,13 +132,12 @@ impl Inode {
 
     // Block numbers iterator
     pub fn get_blocks_iter<'a>(&'a self, disk: &'a Disk) -> Result<ReadBlockNum<'a>, Error> {
-        Ok(ReadBlockNum {
-            blocks_per_block: self.block_size / mem::size_of::<u32>(),
-            i_block: &self.ext2_inode.i_block,
-            data_blocks_count: self.data_blocks_count,
-            cache: BlockCache::new(disk, self.block_size),
-            curr: 0,
-        })
+        Ok(ReadBlockNum::new(
+            disk,
+            &self.ext2_inode.i_block,
+            self.block_size,
+            self.data_blocks_count,
+        ))
     }
 
     // Block numbers
@@ -134,7 +148,7 @@ impl Inode {
         }
     }
 
-    // Resolve a child
+    // Resolve a child by name - return the child's inode
     pub fn get_child(
         &self,
         disk: &Disk,
@@ -185,9 +199,9 @@ impl Inode {
     pub fn readlink(&self, disk: &Disk) -> Result<String, Error> {
         // The target of a symbolic link is stored in the inode
         // if it is less than 60 bytes long.
-        if self.ext2_inode.i_size <= I_BLOCKS_SIZE as u32 {
+        if self.size <= I_BLOCKS_SIZE as u64 {
             let buffer: [u8; I_BLOCKS_SIZE] = unsafe { mem::transmute(self.ext2_inode.i_block) };
-            let target = &buffer[0..self.ext2_inode.i_size as usize];
+            let target = &buffer[0..self.size as usize];
             match str::from_utf8(target) {
                 Ok(result) => Ok(String::from(result)),
                 Err(e) => Err(Error::new(ErrorKind::InvalidData, e)),
@@ -217,44 +231,77 @@ impl Inode {
 }
 
 pub struct ReadBlockNum<'a> {
-    blocks_per_block: usize, // number of block number (u32) in a block
+    blocks_per_block: u32, // number of block number (u32) in a block
     i_block: &'a [u32; EXT2_N_BLOCKS],
     data_blocks_count: u32,
     cache: BlockCache<'a>,
-    curr: usize,
+    first_indirect_block: u32,
+    first_doubly_indirect_block: u32,
+    first_triply_indirect_block: u32,
+    curr: u32,
 }
 
 impl ReadBlockNum<'_> {
-    fn get_direct_block(&self, i: usize) -> Result<u32, Error> {
-        // Get direct block
-        Ok(self.i_block[i])
+    pub fn new<'a>(
+        disk: &'a Disk,
+        i_block: &'a [u32; EXT2_N_BLOCKS],
+        block_size: usize,
+        data_blocks_count: u32,
+    ) -> ReadBlockNum<'a> {
+        let blocks_per_block = (block_size / mem::size_of::<u32>()) as u32;
+        ReadBlockNum {
+            blocks_per_block: blocks_per_block,
+            i_block: i_block,
+            data_blocks_count: data_blocks_count,
+            cache: BlockCache::new(disk, block_size),
+            first_indirect_block: EXT2_NDIR_BLOCKS as u32,
+            first_doubly_indirect_block: EXT2_NDIR_BLOCKS as u32 + blocks_per_block,
+            first_triply_indirect_block: EXT2_NDIR_BLOCKS as u32
+                + blocks_per_block
+                + (blocks_per_block * blocks_per_block),
+            curr: 0,
+        }
     }
 
-    fn get_indirect_block(&mut self, i: usize) -> Result<u32, Error> {
+    fn get_direct_block(&self, i: u32) -> Result<u32, Error> {
+        // Get direct block
+        Ok(self.i_block[i as usize])
+    }
+
+    fn get_indirect_block(&mut self, i: u32, indirect_block_num: u32) -> Result<u32, Error> {
         // Get singly indirect block
-        let indirect_block_num: u32 = self.i_block[EXT2_IND_BLOCK];
         let indirect_blocks = self.cache.get_block(indirect_block_num)?;
-        let addr: usize = (i - EXT2_NDIR_BLOCKS) * mem::size_of::<u32>();
+        let addr: usize = i as usize * mem::size_of::<u32>();
         let bytes: [u8; 4] = indirect_blocks[addr..addr + 4]
             .try_into()
             .expect("incorrect length");
         Ok(u32::from_le_bytes(bytes))
     }
 
-    fn get_doubly_indirect_block(&mut self, _: usize) -> Result<u32, Error> {
+    fn get_doubly_indirect_block(
+        &mut self,
+        i: u32,
+        doubly_indirect_block_num: u32,
+    ) -> Result<u32, Error> {
         // Get doubly indirect block
-        Err(Error::new(
-            ErrorKind::Unsupported,
-            "TODO: dobuly indirect block",
-        ))
+        let indirect_block_num_i = i / self.blocks_per_block;
+        let indirect_block_num =
+            self.get_indirect_block(indirect_block_num_i, doubly_indirect_block_num)?;
+        let i = i - indirect_block_num_i * self.blocks_per_block;
+        self.get_indirect_block(i, indirect_block_num)
     }
 
-    fn get_triply_indirect_block(&mut self, _: usize) -> Result<u32, Error> {
+    fn get_triply_indirect_block(
+        &mut self,
+        i: u32,
+        triply_indirect_block_num: u32,
+    ) -> Result<u32, Error> {
         // Get triply indirect block
-        Err(Error::new(
-            ErrorKind::Unsupported,
-            "TODO: triply indirect block",
-        ))
+        let doubly_indirect_block_num_i = i / self.blocks_per_block / self.blocks_per_block;
+        let doubly_indirect_block_num =
+            self.get_indirect_block(doubly_indirect_block_num_i, triply_indirect_block_num)?;
+        let i = i - doubly_indirect_block_num_i * self.blocks_per_block * self.blocks_per_block;
+        self.get_doubly_indirect_block(i, doubly_indirect_block_num)
     }
 }
 
@@ -264,22 +311,24 @@ impl Iterator for ReadBlockNum<'_> {
 
     fn next(&mut self) -> Option<Self::Item> {
         let i = self.curr;
-        if self.curr >= self.data_blocks_count as usize {
+        if self.curr >= self.data_blocks_count {
             None
         } else {
             self.curr = self.curr + 1;
-            if i < EXT2_NDIR_BLOCKS {
+            if i < self.first_indirect_block {
                 Some(self.get_direct_block(i))
-            } else if i < (EXT2_NDIR_BLOCKS + self.blocks_per_block) {
-                Some(self.get_indirect_block(i))
-            } else if i
-                < (EXT2_NDIR_BLOCKS
-                    + self.blocks_per_block
-                    + self.blocks_per_block * self.blocks_per_block)
-            {
-                Some(self.get_doubly_indirect_block(i))
+            } else if i < self.first_doubly_indirect_block {
+                let i = i - self.first_indirect_block;
+                let indirect_block_num: u32 = self.i_block[EXT2_IND_BLOCK];
+                Some(self.get_indirect_block(i, indirect_block_num))
+            } else if i < self.first_triply_indirect_block {
+                let i = i - self.first_doubly_indirect_block;
+                let doubly_indirect_block_num: u32 = self.i_block[EXT2_DOUBLY_IND_BLOCK];
+                Some(self.get_doubly_indirect_block(i, doubly_indirect_block_num))
             } else {
-                Some(self.get_triply_indirect_block(i))
+                let i = i - self.first_triply_indirect_block;
+                let triply_indirect_block_num: u32 = self.i_block[EXT2_TRIPLY_IND_BLOCK];
+                Some(self.get_triply_indirect_block(i, triply_indirect_block_num))
             }
         }
     }

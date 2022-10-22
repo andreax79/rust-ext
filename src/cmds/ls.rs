@@ -23,11 +23,18 @@ fn format_time(time: u32) -> String {
     }
 }
 
+struct LsFlags {
+    long_flg: bool,
+    inode_flg: bool,
+    size_flg: bool,
+}
+
 fn parse_args(
     args: Vec<String>,
     paths: &mut Vec<String>,
     long_flg: &mut bool,
     inode_flg: &mut bool,
+    size_flg: &mut bool,
 ) {
     // Parse command argument
     let mut parser = ArgumentParser::new();
@@ -41,27 +48,30 @@ fn parse_args(
         StoreTrue,
         "print the index number of each file",
     );
+    parser.refer(size_flg).add_option(
+        &["-s", "--size"],
+        StoreTrue,
+        "print the allocated size of each file, in blocks",
+    );
     if let Err(x) = parser.parse(args, &mut io::stdout(), &mut io::stderr()) {
         std::process::exit(x);
     }
 }
 
-fn print_direntry(
-    fs: &mut Ext2Filesystem,
-    entry: &DirEntry,
-    long_flg: bool,
-    inode_flg: bool,
-) -> Result<(), Error> {
+fn print_direntry(fs: &mut Ext2Filesystem, entry: &DirEntry, flags: &LsFlags) -> Result<(), Error> {
     let inode = fs.read_inode(entry.inode_num)?;
     let mut prefix = String::new();
-    if inode_flg {
-        prefix = format!("{:7 } ", inode.inode_num);
+    if flags.inode_flg {
+        prefix.push_str(&format!("{:7 } ", inode.inode_num));
+    }
+    if flags.size_flg {
+        prefix.push_str(&format!("{:7 } ", inode.ext2_inode.i_blocks));
     }
     let mut suffix = String::new();
     if inode.is_symlink() {
         suffix = format!("-> {}", inode.readlink(&mut fs.disk)?);
     }
-    if long_flg {
+    if flags.long_flg {
         println!(
             "{}{:10} {:4} {:5} {:5} {:8} {} {} {}",
             prefix,
@@ -69,7 +79,7 @@ fn print_direntry(
             inode.ext2_inode.i_links_count,
             inode.ext2_inode.i_uid,
             inode.ext2_inode.i_gid,
-            inode.ext2_inode.i_size,
+            inode.size,
             format_time(inode.ext2_inode.i_mtime),
             entry.file_name,
             suffix,
@@ -80,34 +90,24 @@ fn print_direntry(
     Ok(())
 }
 
-fn print_dir(
-    fs: &mut Ext2Filesystem,
-    inode: &Inode,
-    long_flg: bool,
-    inode_flg: bool,
-) -> Result<(), Error> {
+fn print_dir(fs: &mut Ext2Filesystem, inode: &Inode, flags: &LsFlags) -> Result<(), Error> {
     let entries = inode.readdir(&mut fs.disk)?;
     for entry in entries.values() {
-        print_direntry(fs, &entry, long_flg, inode_flg)?
+        print_direntry(fs, &entry, flags)?
     }
     Ok(())
 }
 
-fn print_path(
-    fs: &mut Ext2Filesystem,
-    path: &str,
-    long_flg: bool,
-    inode_flg: bool,
-) -> Result<(), Error> {
+fn print_path(fs: &mut Ext2Filesystem, path: &str, flags: &LsFlags) -> Result<(), Error> {
     let inode = fs.resolve(path)?;
     if inode.is_dir() {
-        print_dir(fs, &inode, long_flg, inode_flg)
+        print_dir(fs, &inode, flags)
     } else {
         let entry = DirEntry {
             file_name: String::from(path),
             inode_num: inode.inode_num,
         };
-        print_direntry(fs, &entry, long_flg, inode_flg)
+        print_direntry(fs, &entry, flags)
     }
 }
 
@@ -116,12 +116,24 @@ pub fn ls(options: &Options, args: Vec<String>) -> Result<(), Error> {
     let mut paths: Vec<String> = vec![];
     let mut long_flg = false;
     let mut inode_flg = false;
-    parse_args(args, &mut paths, &mut long_flg, &mut inode_flg);
+    let mut size_flg = false;
+    parse_args(
+        args,
+        &mut paths,
+        &mut long_flg,
+        &mut inode_flg,
+        &mut size_flg,
+    );
     if paths.is_empty() {
         paths = vec![String::from("/")];
     }
+    let flags = LsFlags {
+        long_flg,
+        inode_flg,
+        size_flg,
+    };
     for path in paths.iter() {
-        match print_path(&mut fs, &path, long_flg, inode_flg) {
+        match print_path(&mut fs, &path, &flags) {
             Ok(_) => {}
             Err(err) => {
                 eprintln!("ls: {}: {}", path, err);
