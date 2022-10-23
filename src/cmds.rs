@@ -2,6 +2,7 @@ pub mod cat;
 pub mod df;
 pub mod hd;
 pub mod ls;
+pub mod stat;
 
 use std::io::Error;
 use std::str::FromStr;
@@ -18,6 +19,7 @@ pub enum Command {
     df,
     hd,
     ls,
+    stat,
 }
 
 impl FromStr for Command {
@@ -28,6 +30,7 @@ impl FromStr for Command {
             "df" => Ok(Command::df),
             "hd" => Ok(Command::hd),
             "ls" => Ok(Command::ls),
+            "stat" => Ok(Command::stat),
             _ => Err(()),
         };
     }
@@ -40,6 +43,7 @@ impl Command {
             Command::df => df::df(&options, args),
             Command::hd => hd::hd(&options, args),
             Command::ls => ls::ls(&options, args),
+            Command::stat => stat::stat(&options, args),
         }
     }
 }

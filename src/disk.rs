@@ -11,11 +11,11 @@ use std::io::SeekFrom;
 #[derive(Debug)]
 pub enum Offset {
     Block {
-        block_size: usize,
+        block_size: u32,
         block_num: u32,
     },
     BlockDelta {
-        block_size: usize,
+        block_size: u32,
         base_block_num: u32,
         delta: u64,
     },
@@ -37,25 +37,35 @@ impl Offset {
     }
 }
 
-pub struct Disk {
+pub struct FileDisk {
     file: UnsafeCell<File>,
 }
 
-impl Disk {
+pub trait Disk {
+    fn read(&self, size: u32, offset: Offset) -> Result<Vec<u8>, Error>;
+
+    fn calc_offset(&self, block_size: u32, base_block_num: u32, delta: u64) -> u64 {
+        base_block_num as u64 * block_size as u64 + delta
+    }
+}
+
+impl FileDisk {
     pub fn open(filename: &str) -> Result<Self, Error> {
         let file = File::open(filename)?;
         Ok(Self { file: file.into() })
     }
+}
 
-    pub fn read(&self, size: usize, offset: Offset) -> Result<Vec<u8>, Error> {
+impl Disk for FileDisk {
+    fn read(&self, size: u32, offset: Offset) -> Result<Vec<u8>, Error> {
         let offset: u64 = offset.calc_offset();
         let mut buffer: Vec<u8> = Vec::new();
-        buffer.resize(size, 0);
+        buffer.resize(size as usize, 0);
         unsafe {
             let mut file = &*self.file.get();
             file.seek(SeekFrom::Start(offset))?;
             let nbytes: usize = file.read(&mut buffer)?;
-            if nbytes != size {
+            if nbytes != size as usize {
                 Err(Error::new(
                     ErrorKind::UnexpectedEof,
                     format!("Not enough bytes read {nbytes} < {size}"),
@@ -65,20 +75,16 @@ impl Disk {
             }
         }
     }
-
-    pub fn calc_offset(&self, block_size: usize, base_block_num: u32, delta: u64) -> u64 {
-        base_block_num as u64 * block_size as u64 + delta
-    }
 }
 
 pub struct BlockCache<'a> {
-    disk: &'a Disk,
-    block_size: usize,
+    disk: &'a Box<dyn Disk>,
+    block_size: u32,
     cache: HashMap<u32, Vec<u8>>,
 }
 
 impl BlockCache<'_> {
-    pub fn new(disk: &Disk, block_size: usize) -> BlockCache {
+    pub fn new(disk: &Box<dyn Disk>, block_size: u32) -> BlockCache {
         let cache: HashMap<u32, Vec<u8>> = HashMap::new();
         BlockCache {
             disk: disk,

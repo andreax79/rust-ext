@@ -1,6 +1,8 @@
 use crate::dir::DirEntry;
 use crate::disk::{BlockCache, Disk, Offset};
-use crate::group::Ext2BlockGroups;
+use crate::ext2::dir::Ext2DirEntry;
+use crate::ext2::group::Ext2BlockGroups;
+use crate::metadata::Metadata;
 use std::collections::BTreeMap;
 use std::io::Error;
 use std::io::ErrorKind;
@@ -39,9 +41,9 @@ pub struct Ext2Inode {
     pub i_generation: u32, /* File version (for NFS) */
     pub i_file_acl: u32,   /* File ACL */
     pub i_size_high: u32,
-    pub i_faddr: u32,      /* Fragment address */
-    pub l_i_frag: u8,      /* Fragment number */
-    pub l_i_fsize: u8,     /* Fragment size */
+    pub i_faddr: u32,  /* Fragment address */
+    pub l_i_frag: u8,  /* Fragment number */
+    pub l_i_fsize: u8, /* Fragment size */
     pub i_pad1: u16,
     pub l_i_uid_high: u16, /* these 2 fields    */
     pub l_i_gid_high: u16, /* were reserved2[0] */
@@ -67,17 +69,17 @@ impl Ext2Inode {
 pub struct Inode {
     pub inode_num: u32,         // Inode number
     pub ext2_inode: Ext2Inode,  // Ext2 inode struct
-    pub inode_size: usize,      // Inode size
-    pub block_size: usize,      // Block size
+    pub inode_size: u32,        // Inode size
+    pub block_size: u32,        // Block size
     pub size: u64,              // Size in bytes
     pub data_blocks_count: u32, // Number of data blocks
 }
 
 impl Inode {
     pub fn new(
-        disk: &Disk,
-        inode_size: usize,
-        block_size: usize,
+        disk: &Box<dyn Disk>,
+        inode_size: u32,
+        block_size: u32,
         block_groups: &Ext2BlockGroups,
         inode_num: u32,
     ) -> Result<Inode, Error> {
@@ -95,7 +97,7 @@ impl Inode {
         let mut buf = buffer.as_slice();
         let p = &mut inode as *mut _ as *mut u8;
         unsafe {
-            let inode_slice = slice::from_raw_parts_mut(p, inode_size);
+            let inode_slice = slice::from_raw_parts_mut(p, inode_size as usize);
             buf.read_exact(inode_slice).unwrap();
         }
         // Calculate the size
@@ -113,7 +115,7 @@ impl Inode {
     }
 
     // Read blocks iterator
-    pub fn read_blocks_iter<'a>(&'a self, disk: &'a Disk) -> Result<ReadBlock<'a>, Error> {
+    pub fn read_blocks_iter<'a>(&'a self, disk: &'a Box<dyn Disk>) -> Result<ReadBlock<'a>, Error> {
         Ok(ReadBlock {
             disk: disk,
             block_size: self.block_size,
@@ -122,7 +124,7 @@ impl Inode {
     }
 
     // Read file content
-    pub fn read(&self, disk: &Disk) -> Result<Vec<u8>, Error> {
+    pub fn read(&self, disk: &Box<dyn Disk>) -> Result<Vec<u8>, Error> {
         let mut buffer: Vec<u8> = Vec::new();
         for block in self.read_blocks_iter(disk)? {
             buffer.extend(&block?);
@@ -131,7 +133,10 @@ impl Inode {
     }
 
     // Block numbers iterator
-    pub fn get_blocks_iter<'a>(&'a self, disk: &'a Disk) -> Result<ReadBlockNum<'a>, Error> {
+    pub fn get_blocks_iter<'a>(
+        &'a self,
+        disk: &'a Box<dyn Disk>,
+    ) -> Result<ReadBlockNum<'a>, Error> {
         Ok(ReadBlockNum::new(
             disk,
             &self.ext2_inode.i_block,
@@ -141,7 +146,7 @@ impl Inode {
     }
 
     // Block numbers
-    pub fn get_blocks(&self, disk: &Disk) -> Result<Vec<u32>, Error> {
+    pub fn get_blocks(&self, disk: &Box<dyn Disk>) -> Result<Vec<u32>, Error> {
         match self.get_blocks_iter(disk) {
             Ok(iterator) => iterator.collect::<Result<Vec<_>, _>>(),
             Err(x) => Err(x),
@@ -151,7 +156,7 @@ impl Inode {
     // Resolve a child by name - return the child's inode
     pub fn get_child(
         &self,
-        disk: &Disk,
+        disk: &Box<dyn Disk>,
         block_groups: &Ext2BlockGroups,
         name: &str,
     ) -> Option<Inode> {
@@ -163,7 +168,7 @@ impl Inode {
                         self.inode_size,
                         self.block_size,
                         block_groups,
-                        dir_entry.inode_num,
+                        dir_entry.inode_num(),
                     )
                     .ok()?,
                 ),
@@ -174,21 +179,24 @@ impl Inode {
     }
 
     // Read a directory
-    pub fn readdir(&self, disk: &Disk) -> Result<BTreeMap<String, DirEntry>, Error> {
-        if !self.is_dir() {
+    pub fn readdir(
+        &self,
+        disk: &Box<dyn Disk>,
+    ) -> Result<BTreeMap<String, Box<dyn DirEntry>>, Error> {
+        if !self.metadata().is_dir() {
             Err(Error::new(ErrorKind::InvalidInput, "Not a directory"))
             // Err(Error::new(ErrorKind::NotADirectory, "Not a directory"))
         } else {
-            let mut entries = BTreeMap::new();
+            let mut entries: BTreeMap<String, Box<dyn DirEntry>> = BTreeMap::new();
             // Iterate over blocks
             for buffer in self.read_blocks_iter(disk)? {
                 let buffer = buffer?;
-                let mut offset = 0;
+                let mut offset: usize = 0;
                 // Iterate over block directory entries
-                while offset < self.block_size {
-                    let (dir_entry, rec_len) = DirEntry::read(&buffer, offset);
+                while offset < self.block_size as usize {
+                    let (dir_entry, rec_len) = Ext2DirEntry::new(&buffer, offset);
                     offset += rec_len;
-                    entries.insert(dir_entry.file_name.clone(), dir_entry);
+                    entries.insert(dir_entry.file_name.clone(), Box::new(dir_entry));
                 }
             }
             Ok(entries)
@@ -196,7 +204,7 @@ impl Inode {
     }
 
     // Read value of a symbolic link
-    pub fn readlink(&self, disk: &Disk) -> Result<String, Error> {
+    pub fn readlink(&self, disk: &Box<dyn Disk>) -> Result<String, Error> {
         // The target of a symbolic link is stored in the inode
         // if it is less than 60 bytes long.
         if self.size <= I_BLOCKS_SIZE as u64 {
@@ -214,19 +222,26 @@ impl Inode {
         }
     }
 
-    // Tests whether this inode is a directory
-    pub fn is_dir(&self) -> bool {
-        return unix_mode::is_dir(self.ext2_inode.i_mode as u32);
-    }
-
-    // Tests whether this inode is a regular file
-    pub fn is_file(&self) -> bool {
-        return unix_mode::is_file(self.ext2_inode.i_mode as u32);
-    }
-
-    // Tests whether this inode is a symbolic link
-    pub fn is_symlink(&self) -> bool {
-        return unix_mode::is_symlink(self.ext2_inode.i_mode as u32);
+    // Given a path, query the file system to get information about a file, directory, etc.
+    pub fn metadata(&self) -> Metadata {
+        Metadata {
+            dev: 0 as u64,
+            ino: self.inode_num as u64,
+            mode: self.ext2_inode.i_mode as u32,
+            nlink: self.ext2_inode.i_links_count as u64,
+            uid: self.ext2_inode.i_uid as u32,
+            gid: self.ext2_inode.i_gid as u32,
+            rdev: 0 as u64,
+            size: self.size,
+            atime: self.ext2_inode.i_atime as i64,
+            atime_nsec: self.ext2_inode.i_atime as i64 * 1_000_000,
+            mtime: self.ext2_inode.i_mtime as i64,
+            mtime_nsec: self.ext2_inode.i_mtime as i64 * 1_000_000,
+            ctime: self.ext2_inode.i_ctime as i64,
+            ctime_nsec: self.ext2_inode.i_ctime as i64 * 1_000_000,
+            blksize: self.block_size as u64,
+            blocks: self.ext2_inode.i_blocks as u64,
+        }
     }
 }
 
@@ -243,12 +258,12 @@ pub struct ReadBlockNum<'a> {
 
 impl ReadBlockNum<'_> {
     pub fn new<'a>(
-        disk: &'a Disk,
+        disk: &'a Box<dyn Disk>,
         i_block: &'a [u32; EXT2_N_BLOCKS],
-        block_size: usize,
+        block_size: u32,
         data_blocks_count: u32,
     ) -> ReadBlockNum<'a> {
-        let blocks_per_block = (block_size / mem::size_of::<u32>()) as u32;
+        let blocks_per_block = block_size / (mem::size_of::<u32>() as u32);
         ReadBlockNum {
             blocks_per_block: blocks_per_block,
             i_block: i_block,
@@ -335,8 +350,8 @@ impl Iterator for ReadBlockNum<'_> {
 }
 
 pub struct ReadBlock<'a> {
-    disk: &'a Disk,
-    block_size: usize,
+    disk: &'a Box<dyn Disk>,
+    block_size: u32,
     blocks: ReadBlockNum<'a>,
 }
 

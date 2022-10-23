@@ -1,11 +1,11 @@
 pub mod cmds;
 pub mod dir;
 pub mod disk;
+pub mod ext2;
 pub mod file;
 pub mod fs;
-pub mod group;
 pub mod inode;
-pub mod superblock;
+pub mod metadata;
 
 use crate::cmds::{Command, Options};
 use crate::disk::Disk;

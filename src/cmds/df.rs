@@ -1,5 +1,6 @@
 use crate::cmds::Options;
-use crate::fs::Ext2Filesystem;
+use crate::ext2::Ext2Filesystem;
+use crate::fs::Filesystem;
 use argparse::ArgumentParser;
 use humansize::{file_size_opts as options, FileSize};
 use std::io::{self, Error};
@@ -16,8 +17,8 @@ fn parse_args(args: Vec<String>) {
 pub fn df(options: &Options, args: Vec<String>) -> Result<(), Error> {
     let fs = Ext2Filesystem::open(&options.filename)?;
     parse_args(args);
-    let size = fs.super_block.s_blocks_count * fs.super_block.get_blocksize() as u32;
-    let avail = fs.super_block.s_free_blocks_count * fs.super_block.get_blocksize() as u32;
+    let size = fs.get_blocks_count() * fs.get_blocksize();
+    let avail = fs.get_free_blocks_count() * fs.get_blocksize();
     let used = size - avail;
     let use_percent = 100.0 * used as f32 / size as f32;
     println!("Filesystem                        Size           Used      Avail     Use%");

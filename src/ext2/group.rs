@@ -1,6 +1,6 @@
 use crate::disk::Disk;
 use crate::disk::Offset;
-use crate::superblock::Ext2SuperBlock;
+use crate::ext2::superblock::Ext2SuperBlock;
 use std::io::Error;
 use std::io::Read;
 use std::mem;
@@ -67,8 +67,8 @@ pub struct Ext2BlockGroups {
 }
 impl Ext2BlockGroups {
     // Read the Block Groups
-    pub fn new(disk: &Disk, super_block: &Ext2SuperBlock) -> Result<Ext2BlockGroups, Error> {
-        let size: usize = EXT2_GROUP_DESC_SIZE * super_block.get_groups_count();
+    pub fn new(disk: &dyn Disk, super_block: &Ext2SuperBlock) -> Result<Ext2BlockGroups, Error> {
+        let size = (EXT2_GROUP_DESC_SIZE * super_block.get_groups_count()) as u32;
         let block_size = super_block.get_blocksize();
         // Read from disk
         let offset = Offset::Block {

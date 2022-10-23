@@ -1,25 +1,25 @@
-use crate::disk::Offset;
-use crate::fs::Ext2Filesystem;
+use crate::disk::{Disk, Offset};
+use crate::fs::Filesystem;
 use crate::inode::Inode;
 use std::io::{/*BufRead,*/ Error, ErrorKind, Read};
 
 // #[derive(Debug)]
 pub struct FsFile<'a> {
-    fs: &'a Ext2Filesystem,
+    disk: &'a Box<dyn Disk>,
     inode: Inode,
     blocks: Vec<u32>,
     pos: u64,
 }
 
 impl FsFile<'_> {
-    pub fn open<'a>(fs: &'a Ext2Filesystem, path: &str) -> Result<FsFile<'a>, Error> {
+    pub fn open<'a>(fs: &'a dyn Filesystem, path: &str) -> Result<FsFile<'a>, Error> {
         let inode = fs.resolve(path)?;
-        if inode.is_dir() {
+        if inode.metadata().is_dir() {
             Err(Error::new(ErrorKind::InvalidInput, "Is a directory"))
         } else {
-            let blocks = inode.get_blocks(&fs.disk)?;
+            let blocks = inode.get_blocks(fs.get_disk())?;
             Ok(FsFile {
-                fs: fs,
+                disk: fs.get_disk(),
                 inode: inode,
                 blocks: blocks,
                 pos: 0,
@@ -32,7 +32,7 @@ impl FsFile<'_> {
             block_size: self.inode.block_size,
             block_num: self.blocks[file_block_num as usize],
         };
-        self.fs.disk.read(self.inode.block_size, offset)
+        self.disk.read(self.inode.block_size, offset)
     }
 
     fn how_many_bytes(&self, buffer_len: usize) -> usize {

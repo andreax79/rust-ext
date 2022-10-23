@@ -1,11 +1,12 @@
 use crate::disk::Offset;
 use crate::Disk;
 use std::io::Error;
+use std::io::ErrorKind;
 use std::io::Read;
 use std::mem;
 use std::slice;
 
-const SUPER_BLOCK_SIZE: usize = 1024;
+const SUPER_BLOCK_SIZE: u32 = 1024;
 const SUPER_BLOCK: u32 = 1;
 
 #[repr(C)]
@@ -64,13 +65,13 @@ impl Ext2SuperBlock {
         (self.s_blocks_count as f64 / self.s_blocks_per_group as f64).ceil() as usize
     }
     // Get block size
-    pub fn get_blocksize(&self) -> usize {
-        (1024 << self.s_log_block_size) as usize
+    pub fn get_blocksize(&self) -> u32 {
+        1024 << self.s_log_block_size
     }
     // Read the Superblock
-    pub fn new(disk: &Disk) -> Result<Ext2SuperBlock, Error> {
+    pub fn new(disk: &dyn Disk) -> Result<Ext2SuperBlock, Error> {
         let mut super_block: Ext2SuperBlock = unsafe { mem::zeroed() };
-        assert_eq!(mem::size_of::<Ext2SuperBlock>(), SUPER_BLOCK_SIZE);
+        assert_eq!(mem::size_of::<Ext2SuperBlock>(), SUPER_BLOCK_SIZE as usize);
         let offset = Offset::Block {
             block_size: SUPER_BLOCK_SIZE,
             block_num: SUPER_BLOCK,
@@ -78,11 +79,14 @@ impl Ext2SuperBlock {
         let buffer = disk.read(SUPER_BLOCK_SIZE, offset)?;
         let p = &mut super_block as *mut _ as *mut u8;
         unsafe {
-            let block_slice = slice::from_raw_parts_mut(p, SUPER_BLOCK_SIZE);
+            let block_slice = slice::from_raw_parts_mut(p, SUPER_BLOCK_SIZE as usize);
             buffer.as_slice().read_exact(block_slice)?;
         }
         // Check ext2 signature
-        assert_eq!(0xef53, super_block.s_magic);
-        Ok(super_block)
+        if super_block.s_magic == 0xef53 {
+            Ok(super_block)
+        } else {
+            Err(Error::new(ErrorKind::InvalidData, "Invalid filesystem"))
+        }
     }
 }

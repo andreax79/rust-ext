@@ -1,6 +1,7 @@
 use crate::cmds::Options;
+use crate::ext2::Ext2Filesystem;
 use crate::file::FsFile;
-use crate::fs::Ext2Filesystem;
+use crate::fs::Filesystem;
 use argparse::{ArgumentParser, List};
 use std::io::{self, Error, Read, Write};
 
@@ -30,9 +31,9 @@ pub fn print_file(f: &mut FsFile) -> Result<(), Error> {
     Ok(())
 }
 
-pub fn cat_file(path: &String, fs: &Ext2Filesystem) -> Result<(), Error> {
+pub fn cat_file(path: &String, fs: &dyn Filesystem) -> Result<(), Error> {
     // Open a file and print the content on the standard output
-    match FsFile::open(&fs, path) {
+    match FsFile::open(fs, path) {
         Ok(mut f) => {
             print_file(&mut f)?;
         }
@@ -41,24 +42,6 @@ pub fn cat_file(path: &String, fs: &Ext2Filesystem) -> Result<(), Error> {
             std::process::exit(1);
         }
     }
-    // match fs.resolve(path) {
-    //     Ok(mut inode) => {
-    //         if inode.is_dir() {
-    //             eprintln!("cat: {}: Is a directory", path);
-    //             std::process::exit(1);
-    //         }
-    //         for block in inode.read_blocks_iter(&fs.disk)? {
-    //             let block = block?;
-    //             io::stdout()
-    //                 .write(&block)
-    //                 .expect("Unable to write on stdout");
-    //         }
-    //     }
-    //     Err(x) => {
-    //         eprintln!("cat: {}: {}", path, x);
-    //         std::process::exit(1);
-    //     }
-    // }
     Ok(())
 }
 
