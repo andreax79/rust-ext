@@ -1,6 +1,5 @@
 use crate::cmds::Options;
-use crate::ext2::Ext2Filesystem;
-use crate::fs::Filesystem;
+use crate::fs::{open_filesystem, Filesystem};
 use argparse::{ArgumentParser, List};
 use chrono::prelude::*;
 use std::io::{self, Error};
@@ -27,18 +26,24 @@ fn parse_args(args: Vec<String>, paths: &mut Vec<String>) {
     }
 }
 
-fn print_stat(fs: &mut dyn Filesystem, path: &str, _flags: &StatFlags) -> Result<(), Error> {
+fn print_stat(fs: &mut Box<dyn Filesystem>, path: &str, _flags: &StatFlags) -> Result<(), Error> {
     let metadata = fs.metadata(path)?;
-    println!("{:#?}", metadata);
-
     println!("  File: {}", path);
-    println!("  Size: {:<14}  Blocks: {:<9}  IO Block: {:<8} regular file",
-             metadata.size, metadata.blocks, metadata.blksize);
-    println!("Device: {0:04x}h/{0:<06}d   Inode: {1:<10}  Links: {2}",
-             metadata.dev, metadata.ino, metadata.nlink);
-    println!("Access: ({0:04o}/{1})  Uid: ({2})   Gid: ({3})",
-             metadata.mode, unix_mode::to_string(metadata.mode),
-             metadata.uid, metadata.gid);
+    println!(
+        "  Size: {:<14}  Blocks: {:<9}  IO Block: {:<8} {}",
+        metadata.size, metadata.blocks, metadata.blksize, metadata.file_type().to_string()
+    );
+    println!(
+        "Device: {0:04x}h/{0:<06}d   Inode: {1:<10}  Links: {2}",
+        metadata.dev, metadata.ino, metadata.nlink
+    );
+    println!(
+        "Access: ({0:04o}/{1})  Uid: ({2})   Gid: ({3})",
+        metadata.mode,
+        unix_mode::to_string(metadata.mode),
+        metadata.uid,
+        metadata.gid
+    );
     println!("Access: {}", format_time(metadata.atime));
     println!("Modify: {}", format_time(metadata.mtime));
     println!("Change: {}", format_time(metadata.ctime));
@@ -47,7 +52,7 @@ fn print_stat(fs: &mut dyn Filesystem, path: &str, _flags: &StatFlags) -> Result
 }
 
 pub fn stat(options: &Options, args: Vec<String>) -> Result<(), Error> {
-    let mut fs = Ext2Filesystem::open(&options.filename)?;
+    let mut fs = open_filesystem(&options.filename)?;
     let mut paths: Vec<String> = vec![];
     parse_args(args, &mut paths);
     if paths.is_empty() {

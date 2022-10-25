@@ -1,7 +1,6 @@
 use crate::cmds::Options;
-use crate::ext2::Ext2Filesystem;
 use crate::file::FsFile;
-use crate::fs::Filesystem;
+use crate::fs::{open_filesystem, Filesystem};
 use argparse::{ArgumentParser, List};
 use std::io::{self, Error, Read, Write};
 
@@ -31,9 +30,9 @@ pub fn print_file(f: &mut FsFile) -> Result<(), Error> {
     Ok(())
 }
 
-pub fn cat_file(path: &String, fs: &dyn Filesystem) -> Result<(), Error> {
+pub fn cat_file(path: &String, fs: &Box<dyn Filesystem>) -> Result<(), Error> {
     // Open a file and print the content on the standard output
-    match FsFile::open(fs, path) {
+    match fs.open(path) {
         Ok(mut f) => {
             print_file(&mut f)?;
         }
@@ -49,7 +48,7 @@ pub fn cat(options: &Options, args: Vec<String>) -> Result<(), Error> {
     // Parse command argument
     let mut paths: Vec<String> = vec![];
     parse_args(args, &mut paths);
-    let fs = Ext2Filesystem::open(&options.filename)?;
+    let fs = open_filesystem(&options.filename)?;
     for path in paths.iter() {
         cat_file(path, &fs)?;
     }

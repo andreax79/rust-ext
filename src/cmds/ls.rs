@@ -1,7 +1,6 @@
 use crate::cmds::Options;
 use crate::dir::{DefaultDirEntry, DirEntry};
-use crate::ext2::Ext2Filesystem;
-use crate::fs::Filesystem;
+use crate::fs::{open_filesystem, Filesystem};
 use crate::inode::Inode;
 use argparse::{ArgumentParser, List, StoreTrue};
 use chrono::prelude::*;
@@ -9,7 +8,6 @@ use chrono::Duration;
 use std::io::{self, Error};
 use std::str;
 
-// const FMT_LONG: &str = "%Y-%m-%d %H:%M:%S";
 const FMT_NEAR: &str = "%b %e %H:%M";
 const FMT_FAR: &str = "%b %e  %Y";
 
@@ -60,7 +58,7 @@ fn parse_args(
 }
 
 fn print_direntry(
-    fs: &mut dyn Filesystem,
+    fs: &mut Box<dyn Filesystem>,
     entry: &Box<dyn DirEntry>,
     flags: &LsFlags,
 ) -> Result<(), Error> {
@@ -96,7 +94,7 @@ fn print_direntry(
     Ok(())
 }
 
-fn print_dir(fs: &mut dyn Filesystem, inode: &Inode, flags: &LsFlags) -> Result<(), Error> {
+fn print_dir(fs: &mut Box<dyn Filesystem>, inode: &Inode, flags: &LsFlags) -> Result<(), Error> {
     let entries = inode.readdir(fs.get_disk())?;
     for entry in entries.values() {
         print_direntry(fs, &entry, flags)?
@@ -104,7 +102,7 @@ fn print_dir(fs: &mut dyn Filesystem, inode: &Inode, flags: &LsFlags) -> Result<
     Ok(())
 }
 
-fn print_path(fs: &mut dyn Filesystem, path: &str, flags: &LsFlags) -> Result<(), Error> {
+fn print_path(fs: &mut Box<dyn Filesystem>, path: &str, flags: &LsFlags) -> Result<(), Error> {
     let inode = fs.resolve(path)?;
     if inode.metadata().is_dir() {
         print_dir(fs, &inode, flags)
@@ -118,7 +116,7 @@ fn print_path(fs: &mut dyn Filesystem, path: &str, flags: &LsFlags) -> Result<()
 }
 
 pub fn ls(options: &Options, args: Vec<String>) -> Result<(), Error> {
-    let mut fs = Ext2Filesystem::open(&options.filename)?;
+    let mut fs = open_filesystem(&options.filename)?;
     let mut paths: Vec<String> = vec![];
     let mut long_flg = false;
     let mut inode_flg = false;

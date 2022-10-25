@@ -135,4 +135,25 @@ impl FileType {
     pub fn is_socket(&self) -> bool {
         return unix_mode::is_socket(self.0);
     }
+
+    pub fn to_string(&self) -> String {
+        if self.is_file() {
+            String::from("regular file")
+        } else if self.is_dir() {
+            String::from("directory")
+        } else if self.is_block_device() {
+            String::from("block special file")
+        } else if self.is_char_device() {
+            String::from("character special file")
+        } else if self.is_fifo() {
+            String::from("fifo")
+        } else if self.is_symlink() {
+            String::from("symbolic link")
+        } else if self.is_socket() {
+            String::from("socket")
+        } else {
+            String::from("weird file")
+        }
+    }
+
 }
