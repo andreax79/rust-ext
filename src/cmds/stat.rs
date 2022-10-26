@@ -27,7 +27,7 @@ fn parse_args(args: Vec<String>, paths: &mut Vec<String>) {
 }
 
 fn print_stat(fs: &mut Box<dyn Filesystem>, path: &str, _flags: &StatFlags) -> Result<(), Error> {
-    let metadata = fs.metadata(path)?;
+    let metadata = fs.lstat(path)?;
     println!("  File: {}", path);
     println!(
         "  Size: {:<14}  Blocks: {:<9}  IO Block: {:<8} {}",

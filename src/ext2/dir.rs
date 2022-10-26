@@ -17,11 +17,12 @@ struct Ext2DirEntryStruct {
 // Directory entry
 #[derive(Debug)]
 pub struct Ext2DirEntry {
-    pub file_name: String, // file name
-    pub inode_num: u32,    // inode number
+    path: String,      // full path
+    file_name: String, // file name
+    inode_num: u64,    // inode number
 }
 impl Ext2DirEntry {
-    pub fn new(buffer: &Vec<u8>, offset: usize) -> (Ext2DirEntry, usize) {
+    pub fn new(buffer: &Vec<u8>, offset: usize, parent: &str) -> (Ext2DirEntry, usize) {
         let mut ext2_dir_entry = Ext2DirEntryStruct::default();
         let size = mem::size_of::<Ext2DirEntryStruct>();
         let mut buf = &buffer[offset..offset + size];
@@ -36,20 +37,26 @@ impl Ext2DirEntry {
             Err(e) => panic!("Invalid UTF-8 sequence: {}", e),
         };
         let dir_entry = Ext2DirEntry {
+            path: if parent != "/" { format!("{}/{}", parent, name)} else { format!("/{}", name) },
             file_name: String::from(name),
-            inode_num: ext2_dir_entry.inode_num,
+            inode_num: ext2_dir_entry.inode_num as u64,
         };
         (dir_entry, ext2_dir_entry.rec_len as usize)
     }
 }
 
 impl DirEntry for Ext2DirEntry {
+    fn path(&self) -> String {
+        // Returns the full path to the file that this entry represents.
+        return self.path.clone();
+    }
+
     fn file_name(&self) -> String {
         // Returns the bare file name of this directory entry without any other leading path component
         return self.file_name.clone();
     }
 
-    fn inode_num(&self) -> u32 {
+    fn inode_num(&self) -> u64 {
         // Returns the inode number
         return self.inode_num;
     }

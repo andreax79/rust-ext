@@ -1,7 +1,6 @@
 use crate::cmds::Options;
 use crate::dir::{DefaultDirEntry, DirEntry};
 use crate::fs::{open_filesystem, Filesystem};
-use crate::inode::Inode;
 use argparse::{ArgumentParser, List, StoreTrue};
 use chrono::prelude::*;
 use chrono::Duration;
@@ -62,8 +61,7 @@ fn print_direntry(
     entry: &Box<dyn DirEntry>,
     flags: &LsFlags,
 ) -> Result<(), Error> {
-    let inode = fs.read_inode(entry.inode_num())?;
-    let metadata = inode.metadata();
+    let metadata = fs.stat(&entry.path())?;
     let mut prefix = String::new();
     if flags.inode_flg {
         prefix.push_str(&format!("{:7 } ", metadata.ino));
@@ -73,7 +71,7 @@ fn print_direntry(
     }
     let mut suffix = String::new();
     if metadata.is_symlink() {
-        suffix = format!("-> {}", inode.readlink(fs.get_disk())?);
+        suffix = format!("-> {}", fs.readlink(&entry.path())?);
     }
     if flags.long_flg {
         println!(
@@ -94,8 +92,8 @@ fn print_direntry(
     Ok(())
 }
 
-fn print_dir(fs: &mut Box<dyn Filesystem>, inode: &Inode, flags: &LsFlags) -> Result<(), Error> {
-    let entries = inode.readdir(fs.get_disk())?;
+fn print_dir(fs: &mut Box<dyn Filesystem>, path: &str, flags: &LsFlags) -> Result<(), Error> {
+    let entries = fs.readdir(path)?;
     for entry in entries.values() {
         print_direntry(fs, &entry, flags)?
     }
@@ -103,13 +101,14 @@ fn print_dir(fs: &mut Box<dyn Filesystem>, inode: &Inode, flags: &LsFlags) -> Re
 }
 
 fn print_path(fs: &mut Box<dyn Filesystem>, path: &str, flags: &LsFlags) -> Result<(), Error> {
-    let inode = fs.resolve(path)?;
-    if inode.metadata().is_dir() {
-        print_dir(fs, &inode, flags)
+    let metadata = fs.lstat(path)?;
+    if metadata.is_dir() {
+        print_dir(fs, path, flags)
     } else {
         let entry: Box<dyn DirEntry> = Box::new(DefaultDirEntry {
+            path: String::from(path),
             file_name: String::from(path),
-            inode_num: inode.inode_num,
+            inode_num: metadata.ino,
         });
         print_direntry(fs, &entry, flags)
     }

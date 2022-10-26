@@ -48,14 +48,14 @@ impl Ext2GroupDesc {
 pub struct GroupDesc {
     pub group_num: usize,               // Group number
     pub ext2_group_desc: Ext2GroupDesc, // Ext2 group desc struct
-    pub first_inode_num: u32,           // Fist inode in the group
+    pub first_inode_num: u64,           // Fist inode in the group
 }
 impl GroupDesc {
     pub fn new(group_num: usize, buffer: &Vec<u8>, inodes_per_group: u32) -> GroupDesc {
         GroupDesc {
             group_num: group_num,
             ext2_group_desc: Ext2GroupDesc::new(group_num, &buffer),
-            first_inode_num: group_num as u32 * inodes_per_group + 1,
+            first_inode_num: group_num as u64 * inodes_per_group as u64 + 1,
         }
     }
 }
@@ -63,7 +63,7 @@ impl GroupDesc {
 #[derive(Debug)]
 pub struct Ext2BlockGroups {
     block_groups: Vec<GroupDesc>,
-    inodes_per_group: u32, // Number of inodes in each block group
+    inodes_per_group: u64, // Number of inodes in each block group
 }
 impl Ext2BlockGroups {
     // Read the Block Groups
@@ -85,12 +85,12 @@ impl Ext2BlockGroups {
             .collect();
         let result = Ext2BlockGroups {
             block_groups: block_groups,
-            inodes_per_group: super_block.s_inodes_per_group,
+            inodes_per_group: super_block.s_inodes_per_group as u64,
         };
         Ok(result)
     }
     // Determine which block group the inode belongs to and return the group
-    pub fn get_inode_group(&self, inode_num: u32) -> &GroupDesc {
+    pub fn get_inode_group(&self, inode_num: u64) -> &GroupDesc {
         &self.block_groups[((inode_num - 1) / self.inodes_per_group) as usize]
     }
 }

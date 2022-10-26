@@ -67,7 +67,7 @@ impl Ext2Inode {
 
 #[derive(Debug)]
 pub struct Inode {
-    pub inode_num: u32,         // Inode number
+    pub inode_num: u64,         // Inode number
     pub ext2_inode: Ext2Inode,  // Ext2 inode struct
     pub inode_size: u32,        // Inode size
     pub block_size: u32,        // Block size
@@ -81,7 +81,7 @@ impl Inode {
         inode_size: u32,
         block_size: u32,
         block_groups: &Ext2BlockGroups,
-        inode_num: u32,
+        inode_num: u64,
     ) -> Result<Inode, Error> {
         // Determinate the block group
         let group = block_groups.get_inode_group(inode_num);
@@ -160,7 +160,7 @@ impl Inode {
         block_groups: &Ext2BlockGroups,
         name: &str,
     ) -> Option<Inode> {
-        match self.readdir(disk) {
+        match self.readdir(disk, "") {
             Ok(entries) => match entries.get(name) {
                 Some(dir_entry) => Some(
                     Inode::new(
@@ -182,6 +182,7 @@ impl Inode {
     pub fn readdir(
         &self,
         disk: &Box<dyn Disk>,
+        path: &str,
     ) -> Result<BTreeMap<String, Box<dyn DirEntry>>, Error> {
         if !self.metadata().is_dir() {
             Err(Error::new(ErrorKind::InvalidInput, "Not a directory"))
@@ -194,9 +195,9 @@ impl Inode {
                 let mut offset: usize = 0;
                 // Iterate over block directory entries
                 while offset < self.block_size as usize {
-                    let (dir_entry, rec_len) = Ext2DirEntry::new(&buffer, offset);
+                    let (dir_entry, rec_len) = Ext2DirEntry::new(&buffer, offset, path);
                     offset += rec_len;
-                    entries.insert(dir_entry.file_name.clone(), Box::new(dir_entry));
+                    entries.insert(dir_entry.file_name(), Box::new(dir_entry));
                 }
             }
             Ok(entries)
@@ -205,6 +206,9 @@ impl Inode {
 
     // Read value of a symbolic link
     pub fn readlink(&self, disk: &Box<dyn Disk>) -> Result<String, Error> {
+        if ! self.metadata().is_symlink() {
+            return Err(Error::new(ErrorKind::InvalidData, "is not a symbolic link"));
+        }
         // The target of a symbolic link is stored in the inode
         // if it is less than 60 bytes long.
         if self.size <= I_BLOCKS_SIZE as u64 {
@@ -226,7 +230,7 @@ impl Inode {
     pub fn metadata(&self) -> Metadata {
         Metadata {
             dev: 0 as u64,
-            ino: self.inode_num as u64,
+            ino: self.inode_num,
             mode: self.ext2_inode.i_mode as u32,
             nlink: self.ext2_inode.i_links_count as u64,
             uid: self.ext2_inode.i_uid as u32,

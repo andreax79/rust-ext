@@ -14,7 +14,7 @@ use std::io::Error;
 use std::io::ErrorKind;
 use std::str;
 
-const EXT2_ROOT_INO: u32 = 2; /* Root inode */
+const EXT2_ROOT_INO: u64 = 2; /* Root inode */
 
 pub struct Ext2Filesystem {
     disk: Box<dyn Disk>,
@@ -32,6 +32,46 @@ impl Ext2Filesystem {
             super_block: super_block,
             block_groups: block_groups,
         })
+    }
+
+    fn read_inode(&self, inode_num: u64) -> Result<Inode, Error> {
+        // Get inode by number
+        Inode::new(
+            self.get_disk(),
+            self.super_block.s_inode_size as u32,
+            self.super_block.get_blocksize(),
+            &self.block_groups,
+            inode_num,
+        )
+    }
+
+    fn resolve_relative(&self, path: &str, mut inode: Inode, link: bool) -> Result<Inode, Error> {
+        // Get inode by relative path
+        if path.starts_with("/") {
+            // if the path is absolute, resolve from root inode
+            inode = self.read_inode(EXT2_ROOT_INO)?;
+        }
+        let path_parts: Vec<_> = path.split("/").collect();
+        let last = path_parts.len() - 1;
+        for (i, part) in path_parts.iter().enumerate() {
+            if !part.is_empty() {
+                match inode.get_child(&self.disk, &self.block_groups, part) {
+                    Some(child) => {
+                        let resolve_symlink = child.metadata().is_symlink() && (!link || i != last);
+                        if resolve_symlink {
+                            let target = child.readlink(&self.disk)?;
+                            inode = self.resolve_relative(&target, inode, link)?;
+                        } else {
+                            inode = child
+                        }
+                    }
+                    None => {
+                        return Err(Error::new(ErrorKind::NotFound, "No such file or directory"))
+                    }
+                }
+            }
+        }
+        Ok(inode)
     }
 }
 
@@ -56,58 +96,39 @@ impl Filesystem for Ext2Filesystem {
         self.super_block.s_free_blocks_count
     }
 
-    fn read_inode(&self, inode_num: u32) -> Result<Inode, Error> {
-        // Get inode by number
-        Inode::new(
-            self.get_disk(),
-            self.super_block.s_inode_size as u32,
-            self.super_block.get_blocksize(),
-            &self.block_groups,
-            inode_num,
-        )
-    }
-
     fn resolve(&self, path: &str) -> Result<Inode, Error> {
         // Get inode by path
-        let inode = self.read_inode(EXT2_ROOT_INO)?;
-        self.resolve_relative(path, inode)
-    }
-
-    fn resolve_relative(&self, path: &str, mut inode: Inode) -> Result<Inode, Error> {
-        // Get inode by relative path
-        if path.starts_with("/") {
-            // if the path is absolute, resolve from root inode
-            inode = self.read_inode(EXT2_ROOT_INO)?;
-        }
-        for part in path.split("/") {
-            if !part.is_empty() {
-                match inode.get_child(&self.disk, &self.block_groups, part) {
-                    Some(child) => {
-                        if child.metadata().is_symlink() {
-                            let target = child.readlink(&self.disk)?;
-                            inode = self.resolve_relative(&target, inode)?;
-                        } else {
-                            inode = child
-                        }
-                    }
-                    None => {
-                        return Err(Error::new(ErrorKind::NotFound, "No such file or directory"))
-                    }
-                }
-            }
-        }
-        Ok(inode)
+        let root_inode = self.read_inode(EXT2_ROOT_INO)?;
+        self.resolve_relative(path, root_inode, false)
     }
 
     fn readdir(&self, path: &str) -> Result<BTreeMap<String, Box<dyn DirEntry>>, Error> {
         // Read the contents of a given directory
         let inode = self.resolve(path)?;
-        inode.readdir(&self.disk)
+        inode.readdir(&self.disk, path)
     }
 
-    fn metadata(&self, path: &str) -> Result<Metadata, Error> {
+    fn stat(&self, path: &str) -> Result<Metadata, Error> {
         // Given a path, query the file system to get information about a file, directory, etc.
-        let inode = self.resolve(path)?;
+        let root_inode = self.read_inode(EXT2_ROOT_INO)?;
+        let inode = self.resolve_relative(path, root_inode, true)?;
         Ok(inode.metadata())
     }
+
+    fn lstat(&self, path: &str) -> Result<Metadata, Error> {
+        // Like stat, except that if path is a symbolic link, then the link itself is stat-ed,
+        // not the file that it refers to.
+        let root_inode = self.read_inode(EXT2_ROOT_INO)?;
+        let inode = self.resolve_relative(path, root_inode, true)?;
+        Ok(inode.metadata())
+    }
+    // Like stat, except that if path is a symbolic link, then the link itself is stat-ed,
+
+    fn readlink(&self, path: &str) -> Result<String, Error> {
+        // Read value of a symbolic link
+        let root_inode = self.read_inode(EXT2_ROOT_INO)?;
+        let inode = self.resolve_relative(path, root_inode, true)?;
+        inode.readlink(&self.disk)
+    }
+
 }
