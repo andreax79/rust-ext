@@ -1,6 +1,6 @@
 use crate::cmds::Options;
 use crate::dir::{DefaultDirEntry, DirEntry};
-use crate::fs::{open_filesystem, Filesystem};
+use crate::fs::{mount, Filesystem};
 use argparse::{ArgumentParser, List, StoreTrue};
 use chrono::prelude::*;
 use chrono::Duration;
@@ -61,7 +61,7 @@ fn print_direntry(
     entry: &Box<dyn DirEntry>,
     flags: &LsFlags,
 ) -> Result<(), Error> {
-    let metadata = fs.stat(&entry.path())?;
+    let metadata = fs.metadata(&entry.path())?;
     let mut prefix = String::new();
     if flags.inode_flg {
         prefix.push_str(&format!("{:7 } ", metadata.ino));
@@ -71,7 +71,7 @@ fn print_direntry(
     }
     let mut suffix = String::new();
     if metadata.is_symlink() {
-        suffix = format!("-> {}", fs.readlink(&entry.path())?);
+        suffix = format!("-> {}", fs.read_link(&entry.path())?);
     }
     if flags.long_flg {
         println!(
@@ -93,7 +93,7 @@ fn print_direntry(
 }
 
 fn print_dir(fs: &mut Box<dyn Filesystem>, path: &str, flags: &LsFlags) -> Result<(), Error> {
-    let entries = fs.readdir(path)?;
+    let entries = fs.read_dir(path)?;
     for entry in entries.values() {
         print_direntry(fs, &entry, flags)?
     }
@@ -101,7 +101,7 @@ fn print_dir(fs: &mut Box<dyn Filesystem>, path: &str, flags: &LsFlags) -> Resul
 }
 
 fn print_path(fs: &mut Box<dyn Filesystem>, path: &str, flags: &LsFlags) -> Result<(), Error> {
-    let metadata = fs.lstat(path)?;
+    let metadata = fs.symlink_metadata(path)?;
     if metadata.is_dir() {
         print_dir(fs, path, flags)
     } else {
@@ -115,7 +115,7 @@ fn print_path(fs: &mut Box<dyn Filesystem>, path: &str, flags: &LsFlags) -> Resu
 }
 
 pub fn ls(options: &Options, args: Vec<String>) -> Result<(), Error> {
-    let mut fs = open_filesystem(&options.filename)?;
+    let mut fs = mount(&options.filename)?;
     let mut paths: Vec<String> = vec![];
     let mut long_flg = false;
     let mut inode_flg = false;

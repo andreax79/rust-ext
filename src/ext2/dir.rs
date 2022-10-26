@@ -37,7 +37,11 @@ impl Ext2DirEntry {
             Err(e) => panic!("Invalid UTF-8 sequence: {}", e),
         };
         let dir_entry = Ext2DirEntry {
-            path: if parent != "/" { format!("{}/{}", parent, name)} else { format!("/{}", name) },
+            path: if parent != "/" {
+                format!("{}/{}", parent, name)
+            } else {
+                format!("/{}", name)
+            },
             file_name: String::from(name),
             inode_num: ext2_dir_entry.inode_num as u64,
         };
@@ -46,18 +50,18 @@ impl Ext2DirEntry {
 }
 
 impl DirEntry for Ext2DirEntry {
+    /// Returns the full path to the file that this entry represents.
     fn path(&self) -> String {
-        // Returns the full path to the file that this entry represents.
         return self.path.clone();
     }
 
+    /// Returns the bare file name of this directory entry without any other leading path component
     fn file_name(&self) -> String {
-        // Returns the bare file name of this directory entry without any other leading path component
         return self.file_name.clone();
     }
 
+    /// Returns the inode number
     fn inode_num(&self) -> u64 {
-        // Returns the inode number
         return self.inode_num;
     }
 }

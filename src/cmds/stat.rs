@@ -1,5 +1,5 @@
 use crate::cmds::Options;
-use crate::fs::{open_filesystem, Filesystem};
+use crate::fs::{mount, Filesystem};
 use argparse::{ArgumentParser, List};
 use chrono::prelude::*;
 use std::io::{self, Error};
@@ -27,11 +27,14 @@ fn parse_args(args: Vec<String>, paths: &mut Vec<String>) {
 }
 
 fn print_stat(fs: &mut Box<dyn Filesystem>, path: &str, _flags: &StatFlags) -> Result<(), Error> {
-    let metadata = fs.lstat(path)?;
+    let metadata = fs.symlink_metadata(path)?;
     println!("  File: {}", path);
     println!(
         "  Size: {:<14}  Blocks: {:<9}  IO Block: {:<8} {}",
-        metadata.size, metadata.blocks, metadata.blksize, metadata.file_type().to_string()
+        metadata.size,
+        metadata.blocks,
+        metadata.blksize,
+        metadata.file_type().to_string()
     );
     println!(
         "Device: {0:04x}h/{0:<06}d   Inode: {1:<10}  Links: {2}",
@@ -52,7 +55,7 @@ fn print_stat(fs: &mut Box<dyn Filesystem>, path: &str, _flags: &StatFlags) -> R
 }
 
 pub fn stat(options: &Options, args: Vec<String>) -> Result<(), Error> {
-    let mut fs = open_filesystem(&options.filename)?;
+    let mut fs = mount(&options.filename)?;
     let mut paths: Vec<String> = vec![];
     parse_args(args, &mut paths);
     if paths.is_empty() {

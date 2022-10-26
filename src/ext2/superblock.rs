@@ -6,8 +6,8 @@ use std::io::Read;
 use std::mem;
 use std::slice;
 
-const SUPER_BLOCK_SIZE: u32 = 1024;
-const SUPER_BLOCK: u32 = 1;
+const SUPER_BLOCK_SIZE: u64 = 1024;
+const SUPER_BLOCK: u64 = 1;
 
 #[repr(C)]
 #[derive(Debug)]
@@ -65,8 +65,8 @@ impl Ext2SuperBlock {
         (self.s_blocks_count as f64 / self.s_blocks_per_group as f64).ceil() as usize
     }
     // Get block size
-    pub fn get_blocksize(&self) -> u32 {
-        1024 << self.s_log_block_size
+    pub fn get_block_size(&self) -> u64 {
+        1024 << self.s_log_block_size as u64
     }
     // Read the Superblock
     pub fn new(disk: &dyn Disk) -> Result<Ext2SuperBlock, Error> {

@@ -11,12 +11,12 @@ use std::io::SeekFrom;
 #[derive(Debug)]
 pub enum Offset {
     Block {
-        block_size: u32,
-        block_num: u32,
+        block_size: u64,
+        block_num: u64,
     },
     BlockDelta {
-        block_size: u32,
-        base_block_num: u32,
+        block_size: u64,
+        base_block_num: u64,
         delta: u64,
     },
 }
@@ -27,12 +27,12 @@ impl Offset {
             Offset::Block {
                 block_size,
                 block_num,
-            } => *block_num as u64 * *block_size as u64,
+            } => *block_num as u64 * *block_size,
             Offset::BlockDelta {
                 block_size,
                 base_block_num,
                 delta,
-            } => *base_block_num as u64 * *block_size as u64 + *delta,
+            } => *base_block_num as u64 * *block_size + *delta,
         }
     }
 }
@@ -42,10 +42,10 @@ pub struct FileDisk {
 }
 
 pub trait Disk {
-    fn read(&self, size: u32, offset: Offset) -> Result<Vec<u8>, Error>;
+    fn read(&self, size: u64, offset: Offset) -> Result<Vec<u8>, Error>;
 
-    fn calc_offset(&self, block_size: u32, base_block_num: u32, delta: u64) -> u64 {
-        base_block_num as u64 * block_size as u64 + delta
+    fn calc_offset(&self, block_size: u64, base_block_num: u64, delta: u64) -> u64 {
+        base_block_num as u64 * block_size + delta
     }
 }
 
@@ -57,7 +57,7 @@ impl FileDisk {
 }
 
 impl Disk for FileDisk {
-    fn read(&self, size: u32, offset: Offset) -> Result<Vec<u8>, Error> {
+    fn read(&self, size: u64, offset: Offset) -> Result<Vec<u8>, Error> {
         let offset: u64 = offset.calc_offset();
         let mut buffer: Vec<u8> = Vec::new();
         buffer.resize(size as usize, 0);
@@ -79,13 +79,13 @@ impl Disk for FileDisk {
 
 pub struct BlockCache<'a> {
     disk: &'a Box<dyn Disk>,
-    block_size: u32,
-    cache: HashMap<u32, Vec<u8>>,
+    block_size: u64,
+    cache: HashMap<u64, Vec<u8>>,
 }
 
 impl BlockCache<'_> {
-    pub fn new(disk: &Box<dyn Disk>, block_size: u32) -> BlockCache {
-        let cache: HashMap<u32, Vec<u8>> = HashMap::new();
+    pub fn new(disk: &Box<dyn Disk>, block_size: u64) -> BlockCache {
+        let cache: HashMap<u64, Vec<u8>> = HashMap::new();
         BlockCache {
             disk: disk,
             block_size: block_size,
@@ -93,7 +93,7 @@ impl BlockCache<'_> {
         }
     }
 
-    pub fn get_block(&mut self, block_num: u32) -> Result<&Vec<u8>, Error> {
+    pub fn get_block(&mut self, block_num: u64) -> Result<&Vec<u8>, Error> {
         match self.cache.entry(block_num) {
             Vacant(entry) => {
                 let offset = Offset::Block {

@@ -1,5 +1,5 @@
 use crate::cmds::Options;
-use crate::fs::open_filesystem;
+use crate::fs::mount;
 use argparse::ArgumentParser;
 use humansize::{file_size_opts as options, FileSize};
 use std::io::{self, Error};
@@ -14,10 +14,10 @@ fn parse_args(args: Vec<String>) {
 }
 
 pub fn df(options: &Options, args: Vec<String>) -> Result<(), Error> {
-    let fs = open_filesystem(&options.filename)?;
+    let fs = mount(&options.filename)?;
     parse_args(args);
-    let size = fs.get_blocks_count() * fs.get_blocksize();
-    let avail = fs.get_free_blocks_count() * fs.get_blocksize();
+    let size = fs.get_blocks_count() * fs.get_block_size();
+    let avail = fs.get_free_blocks_count() * fs.get_block_size();
     let used = size - avail;
     let use_percent = 100.0 * used as f32 / size as f32;
     println!("Filesystem                        Size           Used      Avail     Use%");

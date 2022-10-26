@@ -1,9 +1,9 @@
 pub trait DirEntry {
-    // Returns the full path to the file that this entry represents.
+    /// Returns the full path to the file that this entry represents.
     fn path(&self) -> String;
-    // Returns the bare file name of this directory entry without any other leading path component
+    /// Returns the bare file name of this directory entry without any other leading path component
     fn file_name(&self) -> String;
-    // Returns the inode number
+    /// Returns the inode number
     fn inode_num(&self) -> u64;
 }
 
@@ -15,18 +15,18 @@ pub struct DefaultDirEntry {
 }
 
 impl DirEntry for DefaultDirEntry {
+    /// Returns the full path to the file that this entry represents.
     fn path(&self) -> String {
-        // Returns the full path to the file that this entry represents.
         return self.path.clone();
     }
 
+    /// Returns the bare file name of this directory entry without any other leading path component
     fn file_name(&self) -> String {
-        // Returns the bare file name of this directory entry without any other leading path component
         return self.file_name.clone();
     }
 
+    /// Returns the inode number
     fn inode_num(&self) -> u64 {
-        // Returns the inode number
         return self.inode_num;
     }
 }

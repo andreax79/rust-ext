@@ -1,6 +1,6 @@
 use crate::cmds::Options;
 use crate::file::FsFile;
-use crate::fs::{open_filesystem, Filesystem};
+use crate::fs::{mount, Filesystem};
 use argparse::{ArgumentParser, List};
 use std::io::{self, Error, Read};
 
@@ -66,7 +66,7 @@ pub fn hd(options: &Options, args: Vec<String>) -> Result<(), Error> {
     // Parse command argument
     let mut paths: Vec<String> = vec![];
     parse_args(args, &mut paths);
-    let fs = open_filesystem(&options.filename)?;
+    let fs = mount(&options.filename)?;
     for path in paths.iter() {
         show_file(path, &fs)?;
     }

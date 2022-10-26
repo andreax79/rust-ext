@@ -21,28 +21,28 @@ pub struct Metadata {
 }
 
 impl Metadata {
+    /// Returns the file type for this metadata.
     pub fn file_type(&self) -> FileType {
-        // Returns the file type for this metadata.
         FileType(self.mode)
     }
 
+    /// Tests whether this inode is a directory
     pub fn is_dir(&self) -> bool {
-        // Tests whether this inode is a directory
         self.file_type().is_dir()
     }
 
+    /// Tests whether this inode is a regular file
     pub fn is_file(&self) -> bool {
-        // Tests whether this inode is a regular file
         self.file_type().is_file()
     }
 
+    /// Tests whether this inode is a symbolic link
     pub fn is_symlink(&self) -> bool {
-        // Tests whether this inode is a symbolic link
         self.file_type().is_symlink()
     }
 
+    /// Returns the size of the file, in bytes
     pub fn len(&self) -> u64 {
-        // Returns the size of the file, in bytes
         self.size
     }
 }
@@ -101,37 +101,37 @@ impl MetadataExt for Metadata {
 pub struct FileType(u32);
 
 impl FileType {
-    // Tests whether this inode is a directory
+    /// Tests whether this inode is a directory
     pub fn is_dir(&self) -> bool {
         return unix_mode::is_dir(self.0);
     }
 
-    // Tests whether this inode is a regular file
+    /// Tests whether this inode is a regular file
     pub fn is_file(&self) -> bool {
         return unix_mode::is_file(self.0);
     }
 
-    // Tests whether this inode is a symbolic link
+    /// Tests whether this inode is a symbolic link
     pub fn is_symlink(&self) -> bool {
         return unix_mode::is_symlink(self.0);
     }
 
-    // Returns true if this mode represents a fifo, also known as a named pipe.
+    /// Returns true if this mode represents a fifo, also known as a named pipe.
     pub fn is_fifo(&self) -> bool {
         return unix_mode::is_fifo(self.0);
     }
 
-    // Returns true if this mode represents a character device.
+    /// Returns true if this mode represents a character device.
     pub fn is_char_device(&self) -> bool {
         return unix_mode::is_char_device(self.0);
     }
 
-    // Returns true if this mode represents a block device.
+    /// Returns true if this mode represents a block device.
     pub fn is_block_device(&self) -> bool {
         return unix_mode::is_block_device(self.0);
     }
 
-    // Returns true if this mode represents a Unix-domain socket.
+    /// Returns true if this mode represents a Unix-domain socket.
     pub fn is_socket(&self) -> bool {
         return unix_mode::is_socket(self.0);
     }
@@ -155,5 +155,4 @@ impl FileType {
             String::from("weird file")
         }
     }
-
 }

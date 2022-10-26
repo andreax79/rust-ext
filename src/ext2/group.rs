@@ -8,8 +8,8 @@ use std::slice;
 
 const EXT2_GROUP_DESC_SIZE: usize = mem::size_of::<Ext2GroupDesc>();
 
-// Blocks are divided up into block groups.
-// A block group is a contiguous groups of blocks
+/// Blocks are divided up into block groups.
+/// A block group is a contiguous groups of blocks
 #[repr(C)]
 #[derive(Debug)]
 pub struct Ext2GroupDesc {
@@ -66,10 +66,10 @@ pub struct Ext2BlockGroups {
     inodes_per_group: u64, // Number of inodes in each block group
 }
 impl Ext2BlockGroups {
-    // Read the Block Groups
+    /// Read the Block Groups
     pub fn new(disk: &dyn Disk, super_block: &Ext2SuperBlock) -> Result<Ext2BlockGroups, Error> {
-        let size = (EXT2_GROUP_DESC_SIZE * super_block.get_groups_count()) as u32;
-        let block_size = super_block.get_blocksize();
+        let size = (EXT2_GROUP_DESC_SIZE * super_block.get_groups_count()) as u64;
+        let block_size = super_block.get_block_size();
         // Read from disk
         let offset = Offset::Block {
             block_size: block_size,
@@ -89,7 +89,8 @@ impl Ext2BlockGroups {
         };
         Ok(result)
     }
-    // Determine which block group the inode belongs to and return the group
+
+    /// Determine which block group the inode belongs to and return the group
     pub fn get_inode_group(&self, inode_num: u64) -> &GroupDesc {
         &self.block_groups[((inode_num - 1) / self.inodes_per_group) as usize]
     }
